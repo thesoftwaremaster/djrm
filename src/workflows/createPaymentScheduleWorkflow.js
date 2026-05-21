@@ -1,6 +1,7 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
 import { fetchAppSettings } from '../utils/appSettings'
+import { getCurrentUserId } from '../utils/tenant'
 
 const roundCurrency = (value) => {
   return Math.round(Number(value || 0) * 100) / 100
@@ -16,6 +17,8 @@ const getTodayDate = () => {
 }
 
 export const createPaymentScheduleWorkflow = async ({ invoiceId }) => {
+  const userId = await getCurrentUserId()
+
   if (!invoiceId) {
     throw new Error('Invoice is required to create a payment schedule.')
   }
@@ -24,6 +27,7 @@ export const createPaymentScheduleWorkflow = async ({ invoiceId }) => {
     .from('invoices')
     .select('id, total, due_date, booking_id, client_id')
     .eq('id', invoiceId)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (invoiceError) throw invoiceError
@@ -42,6 +46,7 @@ export const createPaymentScheduleWorkflow = async ({ invoiceId }) => {
     .from('payments')
     .select('id, type, paid')
     .eq('invoice_id', invoiceId)
+    .eq('user_id', userId)
     .eq('paid', false)
     .in('type', ['deposit', 'balance'])
 
@@ -64,6 +69,7 @@ export const createPaymentScheduleWorkflow = async ({ invoiceId }) => {
     .insert([
       {
         invoice_id: invoice.id,
+        user_id: userId,
         booking_id: invoice.booking_id,
         amount: depositAmount,
         type: 'deposit',
@@ -72,6 +78,7 @@ export const createPaymentScheduleWorkflow = async ({ invoiceId }) => {
       },
       {
         invoice_id: invoice.id,
+        user_id: userId,
         booking_id: invoice.booking_id,
         amount: balanceAmount,
         type: 'balance',

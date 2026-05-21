@@ -138,6 +138,7 @@ Deno.serve(async (req) => {
     .from('invoices')
     .select(`
       id,
+      user_id,
       invoice_number,
       status,
       subtotal,
@@ -151,6 +152,7 @@ Deno.serve(async (req) => {
       )
     `)
     .eq('id', invoiceId)
+    .eq('user_id', userData.user.id)
     .single()
 
   if (invoiceError || !invoice) {
@@ -175,6 +177,7 @@ Deno.serve(async (req) => {
     .from('invoice_items')
     .select('description, quantity, unit_price, line_total')
     .eq('invoice_id', invoiceId)
+    .eq('user_id', userData.user.id)
 
   if (itemsError) {
     console.error('send-invoice item lookup failed')
@@ -237,6 +240,7 @@ Deno.serve(async (req) => {
       .from('invoices')
       .update({ status: 'sent' })
       .eq('id', invoice.id)
+      .eq('user_id', userData.user.id)
       .not('status', 'in', '("paid","cancelled","sent")')
       .select('status')
       .maybeSingle()

@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { getCurrentUserId } from '../utils/tenant'
 
 export const logActivity = async ({
   entityType,
@@ -11,10 +12,12 @@ export const logActivity = async ({
   metadata = {},
 }) => {
   try {
+    const userId = await getCurrentUserId()
     const { data, error } = await supabase
       .from('activity_logs')
       .insert([
         {
+          user_id: userId,
           entity_type: entityType,
           entity_id: entityId,
           booking_id: bookingId,

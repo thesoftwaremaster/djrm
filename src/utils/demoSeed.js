@@ -210,11 +210,12 @@ const upsertDemoSettings = async (user) => {
   if (error) throw error
 }
 
-const ensureCustomers = async () => {
+const ensureCustomers = async (userId) => {
   const emails = demoCustomers.map((customer) => customer.email)
   const { data: existingCustomers, error: lookupError } = await supabase
     .from('clients')
     .select('id, email')
+    .eq('user_id', userId)
     .in('email', emails)
 
   if (lookupError) throw lookupError
@@ -227,6 +228,7 @@ const ensureCustomers = async () => {
       name: customer.name,
       email: customer.email,
       phone: customer.phone,
+      user_id: userId,
     }))
 
     const { data: insertedCustomers, error: insertError } = await supabase
@@ -245,10 +247,11 @@ const ensureCustomers = async () => {
   }), {})
 }
 
-const ensureEnquiriesAndBookings = async (customersByKey, plan) => {
+const ensureEnquiriesAndBookings = async (customersByKey, plan, userId) => {
   const { data: existingEnquiries, error: enquiryLookupError } = await supabase
     .from('enquiries')
     .select('id, client_id, event_type')
+    .eq('user_id', userId)
     .in('client_id', Object.values(customersByKey).map((customer) => customer.id))
 
   if (enquiryLookupError) throw enquiryLookupError
@@ -271,6 +274,7 @@ const ensureEnquiriesAndBookings = async (customersByKey, plan) => {
       .insert([
         {
           client_id: customer.id,
+          user_id: userId,
           event_type: item.eventType,
           event_date: item.eventDate,
           venue: item.venue || null,
@@ -288,6 +292,7 @@ const ensureEnquiriesAndBookings = async (customersByKey, plan) => {
   const { data: existingBookings, error: bookingLookupError } = await supabase
     .from('bookings')
     .select('id, enquiry_id')
+    .eq('user_id', userId)
     .in('enquiry_id', Object.values(enquiriesByKey).map((enquiry) => enquiry.id))
 
   if (bookingLookupError) throw bookingLookupError
@@ -308,6 +313,7 @@ const ensureEnquiriesAndBookings = async (customersByKey, plan) => {
       .insert([
         {
           enquiry_id: enquiry.id,
+          user_id: userId,
           status: item.bookingStatus,
           total_price: item.totalPrice,
         },
@@ -322,13 +328,14 @@ const ensureEnquiriesAndBookings = async (customersByKey, plan) => {
   return { enquiriesByKey, bookingsByKey }
 }
 
-const ensureEvents = async (bookingsByKey, plan) => {
+const ensureEvents = async (bookingsByKey, plan, userId) => {
   const bookingIds = Object.values(bookingsByKey).map((booking) => booking.id)
   if (!bookingIds.length) return
 
   const { data: existingEvents, error: eventLookupError } = await supabase
     .from('events')
     .select('id, booking_id')
+    .eq('user_id', userId)
     .in('booking_id', bookingIds)
 
   if (eventLookupError) throw eventLookupError
@@ -338,6 +345,7 @@ const ensureEvents = async (bookingsByKey, plan) => {
     .filter((item) => bookingsByKey[item.key] && !existingEventBookingIds.has(bookingsByKey[item.key].id))
     .map((item) => ({
       booking_id: bookingsByKey[item.key].id,
+      user_id: userId,
       location: item.venue || null,
       start_time: item.eventStart || null,
       end_time: item.eventEnd || null,
@@ -350,11 +358,12 @@ const ensureEvents = async (bookingsByKey, plan) => {
   if (error) throw error
 }
 
-const ensureInvoices = async (customersByKey, bookingsByKey, plan) => {
+const ensureInvoices = async (customersByKey, bookingsByKey, plan, userId) => {
   const invoiceNumbers = plan.map((item) => item.invoiceNumber).filter(Boolean)
   const { data: existingInvoices, error: invoiceLookupError } = await supabase
     .from('invoices')
     .select('id, invoice_number')
+    .eq('user_id', userId)
     .in('invoice_number', invoiceNumbers)
 
   if (invoiceLookupError) throw invoiceLookupError
@@ -373,6 +382,7 @@ const ensureInvoices = async (customersByKey, bookingsByKey, plan) => {
       .insert([
         {
           client_id: customersByKey[item.customerKey].id,
+          user_id: userId,
           booking_id: bookingsByKey[item.key]?.id || null,
           invoice_number: item.invoiceNumber,
           status: item.invoiceStatus,
@@ -394,6 +404,7 @@ const ensureInvoices = async (customersByKey, bookingsByKey, plan) => {
       .insert([
         {
           invoice_id: invoice.id,
+          user_id: userId,
           description: `${item.eventType} DJ performance package`,
           quantity: 1,
           unit_price: item.invoiceTotal,
@@ -409,13 +420,14 @@ const ensureInvoices = async (customersByKey, bookingsByKey, plan) => {
   return invoicesByKey
 }
 
-const ensurePayments = async (bookingsByKey, invoicesByKey, plan) => {
+const ensurePayments = async (bookingsByKey, invoicesByKey, plan, userId) => {
   const invoiceIds = Object.values(invoicesByKey).map((invoice) => invoice.id)
   if (!invoiceIds.length) return
 
   const { data: existingPayments, error: paymentLookupError } = await supabase
     .from('payments')
     .select('id, invoice_id')
+    .eq('user_id', userId)
     .in('invoice_id', invoiceIds)
 
   if (paymentLookupError) throw paymentLookupError
@@ -435,6 +447,7 @@ const ensurePayments = async (bookingsByKey, invoicesByKey, plan) => {
       return [
         {
           invoice_id: invoice.id,
+          user_id: userId,
           booking_id: booking?.id || null,
           amount: depositAmount,
           type: 'deposit',
@@ -443,6 +456,7 @@ const ensurePayments = async (bookingsByKey, invoicesByKey, plan) => {
         },
         {
           invoice_id: invoice.id,
+          user_id: userId,
           booking_id: booking?.id || null,
           amount: balanceAmount,
           type: 'balance',
@@ -458,7 +472,7 @@ const ensurePayments = async (bookingsByKey, invoicesByKey, plan) => {
   if (error) throw error
 }
 
-const ensureTasks = async (customersByKey, bookingsByKey, invoicesByKey, plan) => {
+const ensureTasks = async (customersByKey, bookingsByKey, invoicesByKey, plan, userId) => {
   const taskPayloads = [
     {
       itemKey: 'engagement-future',
@@ -510,6 +524,7 @@ const ensureTasks = async (customersByKey, bookingsByKey, invoicesByKey, plan) =
   const { data: existingTasks, error: taskLookupError } = await supabase
     .from('tasks')
     .select('id, source, entity_type, entity_id')
+    .eq('user_id', userId)
     .like('source', 'demo:%')
 
   if (taskLookupError) throw taskLookupError
@@ -525,6 +540,7 @@ const ensureTasks = async (customersByKey, bookingsByKey, invoicesByKey, plan) =
 
       return {
         title: task.title,
+        user_id: userId,
         description: task.description,
         status: 'open',
         priority: task.priority,
@@ -551,12 +567,12 @@ export const ensureDemoSeedData = async (user) => {
   const plan = getDemoPlan()
 
   await upsertDemoSettings(user)
-  const customersByKey = await ensureCustomers()
-  const { bookingsByKey } = await ensureEnquiriesAndBookings(customersByKey, plan)
-  await ensureEvents(bookingsByKey, plan)
-  const invoicesByKey = await ensureInvoices(customersByKey, bookingsByKey, plan)
-  await ensurePayments(bookingsByKey, invoicesByKey, plan)
-  await ensureTasks(customersByKey, bookingsByKey, invoicesByKey, plan)
+  const customersByKey = await ensureCustomers(user.id)
+  const { bookingsByKey } = await ensureEnquiriesAndBookings(customersByKey, plan, user.id)
+  await ensureEvents(bookingsByKey, plan, user.id)
+  const invoicesByKey = await ensureInvoices(customersByKey, bookingsByKey, plan, user.id)
+  await ensurePayments(bookingsByKey, invoicesByKey, plan, user.id)
+  await ensureTasks(customersByKey, bookingsByKey, invoicesByKey, plan, user.id)
 
   return { seeded: true }
 }

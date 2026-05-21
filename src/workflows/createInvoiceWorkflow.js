@@ -9,6 +9,7 @@ import {
   isMissingInvoiceCurrencyError,
 } from '../utils/appSettings.js'
 import { isValidEmail } from '../utils/validation.js'
+import { getCurrentUserId } from '../utils/tenant.js'
 
 const stripEmptyFields = (record) => {
   return Object.fromEntries(
@@ -67,12 +68,13 @@ const validateInvoiceItems = (items = []) => {
   })
 }
 
-const buildInvoiceItemsPayload = ({ items, invoiceId }) => {
+const buildInvoiceItemsPayload = ({ items, invoiceId, userId }) => {
   return items.map((item) => {
     const normalizedItem = normalizeInvoiceItem(item)
 
     return stripEmptyFields({
       invoice_id: invoiceId,
+      user_id: userId,
       description: normalizedItem.description.trim(),
       quantity: normalizedItem.quantity,
       unit_price: normalizedItem.unit_price,
@@ -83,20 +85,21 @@ const buildInvoiceItemsPayload = ({ items, invoiceId }) => {
 
 const normalizeEmail = (email = '') => email.trim().toLowerCase()
 
-const findClientById = async (clientId) => {
+const findClientById = async (clientId, userId) => {
   if (!clientId) return null
 
   const { data, error } = await supabase
     .from('clients')
     .select('id, name, email, phone, created_at')
     .eq('id', clientId)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (error) throw error
   return data
 }
 
-const findClientByEmail = async (email) => {
+const findClientByEmail = async (email, userId) => {
   const normalizedEmail = normalizeEmail(email)
 
   if (!normalizedEmail) return null
@@ -105,6 +108,7 @@ const findClientByEmail = async (email) => {
     .from('clients')
     .select('id, name, email, phone, created_at')
     .eq('email', normalizedEmail)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -113,11 +117,11 @@ const findClientByEmail = async (email) => {
   return data?.[0] || null
 }
 
-const findOrCreateClient = async ({ id, name, email, phone }) => {
+const findOrCreateClient = async ({ id, name, email, phone, userId }) => {
   const normalizedEmail = normalizeEmail(email)
 
   if (id) {
-    const existingClient = await findClientById(id)
+    const existingClient = await findClientById(id, userId)
 
     if (existingClient) {
       if (phone?.trim() && !existingClient.phone) {
@@ -125,6 +129,7 @@ const findOrCreateClient = async ({ id, name, email, phone }) => {
           .from('clients')
           .update({ phone: phone.trim() })
           .eq('id', existingClient.id)
+          .eq('user_id', userId)
           .select('id, name, email, phone, created_at')
           .single()
 
@@ -136,7 +141,7 @@ const findOrCreateClient = async ({ id, name, email, phone }) => {
     }
   }
 
-  const existingClient = await findClientByEmail(normalizedEmail)
+  const existingClient = await findClientByEmail(normalizedEmail, userId)
 
   if (existingClient) {
     if (phone?.trim() && !existingClient.phone) {
@@ -144,6 +149,7 @@ const findOrCreateClient = async ({ id, name, email, phone }) => {
         .from('clients')
         .update({ phone: phone.trim() })
         .eq('id', existingClient.id)
+        .eq('user_id', userId)
         .select('id, name, email, phone, created_at')
         .single()
 
@@ -156,7 +162,7 @@ const findOrCreateClient = async ({ id, name, email, phone }) => {
 
   const { data: newClient, error: createError } = await supabase
     .from('clients')
-    .insert([stripEmptyFields({ name, email: normalizedEmail, phone })])
+    .insert([stripEmptyFields({ name, email: normalizedEmail, phone, user_id: userId })])
     .select()
     .single()
 
@@ -165,7 +171,7 @@ const findOrCreateClient = async ({ id, name, email, phone }) => {
   return newClient
 }
 
-const getBookingContext = async (bookingId) => {
+const getBookingContext = async (bookingId, userId) => {
   if (!bookingId) return null
 
   const { data, error } = await supabase
@@ -191,6 +197,7 @@ const getBookingContext = async (bookingId) => {
       )
     `)
     .eq('id', bookingId)
+    .eq('user_id', userId)
     .single()
 
   if (error) throw error
@@ -224,11 +231,12 @@ const createInvoiceWithCurrencyFallback = async (invoicePayload) => {
   }
 }
 
-const getExistingInvoiceNumber = async (invoiceNumber) => {
+const getExistingInvoiceNumber = async (invoiceNumber, userId) => {
   const { data, error } = await supabase
     .from('invoices')
     .select('id')
     .eq('invoice_number', invoiceNumber)
+    .eq('user_id', userId)
     .limit(1)
 
   if (error) throw error
@@ -236,9 +244,9 @@ const getExistingInvoiceNumber = async (invoiceNumber) => {
   return data?.[0] || null
 }
 
-const createAvailableInvoiceNumber = async (settings, requestedInvoiceNumber) => {
+const createAvailableInvoiceNumber = async (settings, requestedInvoiceNumber, userId) => {
   if (requestedInvoiceNumber) {
-    const existingInvoice = await getExistingInvoiceNumber(requestedInvoiceNumber)
+    const existingInvoice = await getExistingInvoiceNumber(requestedInvoiceNumber, userId)
 
     if (existingInvoice) {
       throw new Error('Invoice number is already in use. Choose another number or update Settings next invoice number.')
@@ -263,7 +271,7 @@ const createAvailableInvoiceNumber = async (settings, requestedInvoiceNumber) =>
   for (let offset = 0; offset < 100; offset += 1) {
     const candidateNumberValue = nextInvoiceNumber + offset
     const candidateInvoiceNumber = `${prefix}-${candidateNumberValue}`
-    const existingInvoice = await getExistingInvoiceNumber(candidateInvoiceNumber)
+    const existingInvoice = await getExistingInvoiceNumber(candidateInvoiceNumber, userId)
 
     if (!existingInvoice) {
       return {
@@ -289,6 +297,7 @@ export const createInvoiceWorkflow = async ({
   enquiryStatusAfterInvoice = 'booked',
 }) => {
   const normalizedEmail = normalizeEmail(client?.email)
+  const userId = await getCurrentUserId()
   const existingBookingId = booking?.id || booking?.booking_id || null
 
   if (!isValidEmail(normalizedEmail)) {
@@ -308,14 +317,15 @@ export const createInvoiceWorkflow = async ({
   const invoiceTotal = invoice.total ?? Number(invoiceSubtotal) + Number(invoiceTax)
   const { invoiceNumber, usedInvoiceNumberValue } = await createAvailableInvoiceNumber(
     settings,
-    invoice.invoice_number
+    invoice.invoice_number,
+    userId
   )
   const invoiceDueDate = invoice.due_date || getDateAfterDays(settings.default_due_days)
   const invoiceCurrency = invoice.currency || settings.currency
 
   try {
     if (existingBookingId) {
-      const existingBooking = await getBookingContext(existingBookingId)
+      const existingBooking = await getBookingContext(existingBookingId, userId)
       const bookingClient = existingBooking?.enquiries?.clients
       const bookingClientEmail = normalizeEmail(bookingClient?.email)
 
@@ -327,6 +337,7 @@ export const createInvoiceWorkflow = async ({
 
       const invoicePayload = stripEmptyFields({
         client_id: bookingClient.id,
+        user_id: userId,
         booking_id: existingBooking.id,
         invoice_number: invoiceNumber,
         status: invoice.status || 'draft',
@@ -343,6 +354,7 @@ export const createInvoiceWorkflow = async ({
       const invoiceItems = buildInvoiceItemsPayload({
         items,
         invoiceId: savedInvoice.id,
+        userId,
       })
 
       const { data: savedItems, error: itemsError } = await supabase
@@ -382,6 +394,7 @@ export const createInvoiceWorkflow = async ({
     const savedClient = await findOrCreateClient({
       ...client,
       email: normalizedEmail,
+      userId,
     })
 
     const { data: savedEnquiry, error: enquiryError } = await supabase
@@ -389,6 +402,7 @@ export const createInvoiceWorkflow = async ({
       .insert([
         stripEmptyFields({
           client_id: savedClient.id,
+          user_id: userId,
           event_type: enquiry.event_type || event?.event_type,
           event_date: enquiry.event_date || event?.event_date,
           venue: enquiry.venue || event?.venue || event?.location,
@@ -406,6 +420,7 @@ export const createInvoiceWorkflow = async ({
       .insert([
         stripEmptyFields({
           enquiry_id: savedEnquiry.id,
+          user_id: userId,
           status: booking.status || settings.default_booking_status || 'pending',
           total_price: booking.total_price ?? invoiceTotal,
           notes: booking.notes,
@@ -433,6 +448,7 @@ export const createInvoiceWorkflow = async ({
         .insert([
           stripEmptyFields({
             booking_id: savedBooking.id,
+            user_id: userId,
             location: event.location || event.venue,
             start_time: event.start_time,
             end_time: event.end_time,
@@ -448,6 +464,7 @@ export const createInvoiceWorkflow = async ({
 
     const invoicePayload = stripEmptyFields({
       client_id: savedClient.id,
+      user_id: userId,
       booking_id: savedBooking.id,
       invoice_number: invoiceNumber,
       status: invoice.status || 'draft',
@@ -464,6 +481,7 @@ export const createInvoiceWorkflow = async ({
     const invoiceItems = buildInvoiceItemsPayload({
       items,
       invoiceId: savedInvoice.id,
+      userId,
     })
 
     const { data: savedItems, error: itemsError } = await supabase
@@ -479,6 +497,7 @@ export const createInvoiceWorkflow = async ({
       .from('enquiries')
       .update({ status: enquiryStatusAfterInvoice })
       .eq('id', savedEnquiry.id)
+      .eq('user_id', userId)
 
     if (updateEnquiryError) throw updateEnquiryError
 

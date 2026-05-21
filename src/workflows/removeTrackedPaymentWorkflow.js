@@ -1,6 +1,7 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
 import { assertCurrentUserCanDelete } from '../utils/demoMode'
+import { getCurrentUserId } from '../utils/tenant'
 
 const getDeleteErrorMessage = (error) => {
   if (error?.code === '42501') {
@@ -12,6 +13,7 @@ const getDeleteErrorMessage = (error) => {
 
 export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
   await assertCurrentUserCanDelete()
+  const userId = await getCurrentUserId()
 
   if (!paymentId) {
     throw new Error('Payment ID is required.')
@@ -21,6 +23,7 @@ export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
     .from('payments')
     .select('id, invoice_id, paid, amount, type')
     .eq('id', paymentId)
+    .eq('user_id', userId)
     .single()
 
   if (paymentError) throw paymentError
@@ -32,6 +35,7 @@ export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
       .from('invoices')
       .select('id, booking_id, client_id')
       .eq('id', payment.invoice_id)
+      .eq('user_id', userId)
       .maybeSingle()
 
     if (invoiceError) throw invoiceError
@@ -42,6 +46,7 @@ export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
     .from('payments')
     .delete()
     .eq('id', payment.id)
+    .eq('user_id', userId)
     .select('id')
     .maybeSingle()
 

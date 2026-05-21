@@ -2,6 +2,7 @@
 import { supabase } from '../supabase'
 import { logActivity } from '../workflows/activityLogActions'
 import { isValidDateInput } from '../utils/validation'
+import { getCurrentUserId } from '../utils/tenant'
 
 const AddPayment = ({ invoiceId, bookingId, remainingBalance, onSuccess }) => {
   const [amount, setAmount] = useState('')
@@ -46,11 +47,13 @@ const AddPayment = ({ invoiceId, bookingId, remainingBalance, onSuccess }) => {
     setSuccessMessage('')
 
     try {
+      const userId = await getCurrentUserId()
       const { data: payment, error } = await supabase
         .from('payments')
         .insert([
           {
             invoice_id: invoiceId,
+            user_id: userId,
             booking_id: bookingId,
             amount: parsedAmount,
             type,

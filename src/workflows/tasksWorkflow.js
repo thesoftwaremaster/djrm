@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { getCurrentUserId } from '../utils/tenant'
 
 const generatedSources = [
   'generated:missing_contract',
@@ -199,6 +200,7 @@ const buildGeneratedTasks = ({ bookings, contracts, invoices, payments }) => {
 }
 
 export const refreshOperationalTasks = async () => {
+  const userId = await getCurrentUserId()
   const [
     bookingsResponse,
     contractsResponse,
@@ -222,19 +224,24 @@ export const refreshOperationalTasks = async () => {
             name
           )
         )
-      `),
+      `)
+      .eq('user_id', userId),
     supabase
       .from('booking_contracts')
-      .select('id, booking_id'),
+      .select('id, booking_id')
+      .eq('user_id', userId),
     supabase
       .from('invoices')
-      .select('id, invoice_number, booking_id, client_id, status'),
+      .select('id, invoice_number, booking_id, client_id, status')
+      .eq('user_id', userId),
     supabase
       .from('payments')
-      .select('id, amount, type, paid, due_date, invoice_id, booking_id'),
+      .select('id, amount, type, paid, due_date, invoice_id, booking_id')
+      .eq('user_id', userId),
     supabase
       .from('tasks')
       .select('id, source, entity_type, entity_id, status')
+      .eq('user_id', userId)
       .in('source', generatedSources),
   ])
 
@@ -251,6 +258,7 @@ export const refreshOperationalTasks = async () => {
   const eventsResponse = await supabase
     .from('events')
     .select('id, booking_id, start_time, end_time, location, created_at')
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
 
   if (eventsResponse.error) throw eventsResponse.error
@@ -281,7 +289,9 @@ export const refreshOperationalTasks = async () => {
     [getTaskKey(task)]: task,
   }), {})
 
-  const tasksToInsert = generatedTasks.filter((task) => !existingTaskByKey[getTaskKey(task)])
+  const tasksToInsert = generatedTasks
+    .filter((task) => !existingTaskByKey[getTaskKey(task)])
+    .map((task) => ({ ...task, user_id: userId }))
   const tasksToUpdate = generatedTasks.filter((task) => {
     const existingTask = existingTaskByKey[getTaskKey(task)]
 
@@ -301,11 +311,13 @@ export const refreshOperationalTasks = async () => {
       .from('tasks')
       .update({
         ...task,
+        user_id: userId,
         status: 'open',
         completed_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', existingTask.id)
+      .eq('user_id', userId)
   })
 
   const operations = [...updateOperations]
@@ -323,6 +335,7 @@ export const refreshOperationalTasks = async () => {
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
+        .eq('user_id', userId)
         .in('id', staleTaskIds)
     )
   }
@@ -332,6 +345,7 @@ export const refreshOperationalTasks = async () => {
       supabase
         .from('tasks')
         .delete()
+        .eq('user_id', userId)
         .in('id', staleCompletedTaskIds)
     )
   }
@@ -350,9 +364,11 @@ export const refreshOperationalTasks = async () => {
 }
 
 export const fetchOpenTasks = async () => {
+  const userId = await getCurrentUserId()
   const { data, error } = await supabase
     .from('tasks')
     .select('*')
+    .eq('user_id', userId)
     .eq('status', 'open')
     .order('due_date', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false })
@@ -363,9 +379,11 @@ export const fetchOpenTasks = async () => {
 }
 
 export const fetchTasks = async () => {
+  const userId = await getCurrentUserId()
   const { data, error } = await supabase
     .from('tasks')
     .select('*')
+    .eq('user_id', userId)
     .order('due_date', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false })
 
@@ -375,6 +393,7 @@ export const fetchTasks = async () => {
 }
 
 export const fetchOpenTasksForRecord = async ({ field, id }) => {
+  const userId = await getCurrentUserId()
   if (!field || !id) return []
 
   const allowedFields = ['booking_id', 'invoice_id', 'client_id']
@@ -386,6 +405,7 @@ export const fetchOpenTasksForRecord = async ({ field, id }) => {
   const { data, error } = await supabase
     .from('tasks')
     .select('*')
+    .eq('user_id', userId)
     .eq('status', 'open')
     .eq(field, id)
     .order('due_date', { ascending: true, nullsFirst: false })
@@ -397,6 +417,7 @@ export const fetchOpenTasksForRecord = async ({ field, id }) => {
 }
 
 export const completeTask = async (taskId) => {
+  const userId = await getCurrentUserId()
   const { data, error } = await supabase
     .from('tasks')
     .update({
@@ -405,6 +426,7 @@ export const completeTask = async (taskId) => {
       updated_at: new Date().toISOString(),
     })
     .eq('id', taskId)
+    .eq('user_id', userId)
     .select()
     .single()
 
@@ -414,6 +436,7 @@ export const completeTask = async (taskId) => {
 }
 
 export const reopenTask = async (taskId) => {
+  const userId = await getCurrentUserId()
   const { data, error } = await supabase
     .from('tasks')
     .update({
@@ -422,6 +445,7 @@ export const reopenTask = async (taskId) => {
       updated_at: new Date().toISOString(),
     })
     .eq('id', taskId)
+    .eq('user_id', userId)
     .select()
     .single()
 

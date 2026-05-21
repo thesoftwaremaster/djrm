@@ -97,7 +97,7 @@ const getContractFileExtension = (fileName = '') => {
 }
 
 const BookingDetails = () => {
-  const { isDemoMode } = useAuth()
+  const { isDemoMode, user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const { id } = useParams()
@@ -618,8 +618,12 @@ ${bookingTemplateData.signOff}`,
     setConfirmRemoveContract(false)
 
     try {
+      if (!user?.id) {
+        throw new Error('You must be signed in to upload contracts.')
+      }
+
       const safeFileName = sanitizeContractFileName(file.name)
-      const filePath = `${booking.id}/${Date.now()}-${safeFileName}`
+      const filePath = `${user.id}/${booking.id}/${Date.now()}-${safeFileName}`
       const previousFilePath = contract?.file_path || null
 
       const { error: uploadError } = await supabase.storage
@@ -637,6 +641,7 @@ ${bookingTemplateData.signOff}`,
         .upsert(
           {
             booking_id: booking.id,
+            user_id: user.id,
             file_name: file.name,
             file_path: filePath,
             status: 'signed',

@@ -1,6 +1,7 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
 import { isValidDateInput, isValidDateTimeInput, isValidEmail } from '../utils/validation'
+import { getCurrentUserId } from '../utils/tenant'
 
 const normalizeOptionalText = (value) => {
   const trimmedValue = value?.trim() || ''
@@ -28,7 +29,7 @@ const logBookingEdited = ({ bookingId }) =>
     },
   })
 
-const findClientByEmail = async (email) => {
+const findClientByEmail = async (email, userId) => {
   const normalizedEmail = normalizeEmail(email)
 
   if (!normalizedEmail) return null
@@ -37,6 +38,7 @@ const findClientByEmail = async (email) => {
     .from('clients')
     .select('id, name, email, phone, created_at')
     .eq('email', normalizedEmail)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -45,22 +47,23 @@ const findClientByEmail = async (email) => {
   return data?.[0] || null
 }
 
-const findClientById = async (clientId) => {
+const findClientById = async (clientId, userId) => {
   if (!clientId) return null
 
   const { data, error } = await supabase
     .from('clients')
     .select('id, name, email, phone, created_at')
     .eq('id', clientId)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (error) throw error
   return data
 }
 
-const findOrCreateClientForEnquiry = async ({ clientId, name, email, phone }) => {
+const findOrCreateClientForEnquiry = async ({ clientId, name, email, phone, userId }) => {
   if (clientId) {
-    const existingClient = await findClientById(clientId)
+    const existingClient = await findClientById(clientId, userId)
 
     if (existingClient) return existingClient
   }
@@ -71,7 +74,7 @@ const findOrCreateClientForEnquiry = async ({ clientId, name, email, phone }) =>
     throw new Error('A valid customer email is required.')
   }
 
-  const existingClient = await findClientByEmail(normalizedEmail)
+  const existingClient = await findClientByEmail(normalizedEmail, userId)
 
   if (existingClient) {
     if (phone?.trim() && !existingClient.phone) {
@@ -79,6 +82,7 @@ const findOrCreateClientForEnquiry = async ({ clientId, name, email, phone }) =>
         .from('clients')
         .update({ phone: phone.trim() })
         .eq('id', existingClient.id)
+        .eq('user_id', userId)
         .select('id, name, email, phone, created_at')
         .single()
 
@@ -96,6 +100,7 @@ const findOrCreateClientForEnquiry = async ({ clientId, name, email, phone }) =>
         name: name.trim(),
         email: normalizedEmail,
         phone: normalizeOptionalText(phone),
+        user_id: userId,
       },
     ])
     .select('id, name, email, phone, created_at')
@@ -127,13 +132,15 @@ export const createEnquiryWithCustomer = async ({
     throw new Error('Event date must be a valid date.')
   }
 
-  const client = await findOrCreateClientForEnquiry({ clientId, name, email, phone })
+  const userId = await getCurrentUserId()
+  const client = await findOrCreateClientForEnquiry({ clientId, name, email, phone, userId })
 
   const { data: enquiry, error } = await supabase
     .from('enquiries')
     .insert([
       {
         client_id: client.id,
+        user_id: userId,
         event_type: eventType,
         event_date: eventDate || null,
         venue: normalizeOptionalText(venue),
@@ -156,6 +163,7 @@ export const updateEnquiryDetails = async ({
   notes,
   status,
 }) => {
+  const userId = await getCurrentUserId()
   if (eventDate && !isValidDateInput(eventDate)) {
     throw new Error('Event date must be a valid date.')
   }
@@ -170,24 +178,29 @@ export const updateEnquiryDetails = async ({
       status,
     })
     .eq('id', enquiryId)
+    .eq('user_id', userId)
 
   if (error) throw error
 }
 
 export const updateEnquiryStatus = async ({ enquiryId, status }) => {
+  const userId = await getCurrentUserId()
   const { error } = await supabase
     .from('enquiries')
     .update({ status })
     .eq('id', enquiryId)
+    .eq('user_id', userId)
 
   if (error) throw error
 }
 
 export const updateBookingStatus = async ({ bookingId, status }) => {
+  const userId = await getCurrentUserId()
   const { error } = await supabase
     .from('bookings')
     .update({ status })
     .eq('id', bookingId)
+    .eq('user_id', userId)
 
   if (error) throw error
 
@@ -214,6 +227,7 @@ export const updateBookingDetails = async ({
   endTime = '',
   notes = '',
 }) => {
+  const userId = await getCurrentUserId()
   if (!bookingId) {
     throw new Error('Booking ID is required.')
   }
@@ -237,6 +251,7 @@ export const updateBookingDetails = async ({
       total_price: totalPrice,
     })
     .eq('id', bookingId)
+    .eq('user_id', userId)
 
   if (bookingError) throw bookingError
 
@@ -254,6 +269,7 @@ export const updateBookingDetails = async ({
       .from('events')
       .update(eventPayload)
       .eq('id', eventId)
+      .eq('user_id', userId)
 
     if (eventError) throw eventError
     await logBookingEdited({ bookingId })
@@ -270,6 +286,7 @@ export const updateBookingDetails = async ({
     .insert([
       {
         booking_id: bookingId,
+        user_id: userId,
         ...eventPayload,
       },
     ])
@@ -279,7 +296,7 @@ export const updateBookingDetails = async ({
   await logBookingEdited({ bookingId })
 }
 
-const ensureBookingEventLocation = async ({ bookingId, location }) => {
+const ensureBookingEventLocation = async ({ bookingId, location, userId }) => {
   const normalizedLocation = normalizeOptionalText(location)
 
   if (!normalizedLocation) return null
@@ -288,6 +305,7 @@ const ensureBookingEventLocation = async ({ bookingId, location }) => {
     .from('events')
     .select('id, location')
     .eq('booking_id', bookingId)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -302,6 +320,7 @@ const ensureBookingEventLocation = async ({ bookingId, location }) => {
       .from('events')
       .update({ location: normalizedLocation })
       .eq('id', existingEvent.id)
+      .eq('user_id', userId)
       .select('id, location')
       .single()
 
@@ -314,6 +333,7 @@ const ensureBookingEventLocation = async ({ bookingId, location }) => {
     .insert([
       {
         booking_id: bookingId,
+        user_id: userId,
         location: normalizedLocation,
       },
     ])
@@ -326,10 +346,12 @@ const ensureBookingEventLocation = async ({ bookingId, location }) => {
 }
 
 export const convertEnquiryToBooking = async ({ enquiryId }) => {
+  const userId = await getCurrentUserId()
   const { data: enquiry, error: enquiryError } = await supabase
     .from('enquiries')
     .select('id, venue, client_id')
     .eq('id', enquiryId)
+    .eq('user_id', userId)
     .single()
 
   if (enquiryError) throw enquiryError
@@ -338,6 +360,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
     .from('bookings')
     .select('id, enquiry_id, status, total_price, created_at')
     .eq('enquiry_id', enquiryId)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -351,6 +374,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
         .from('bookings')
         .update({ status: 'confirmed' })
         .eq('id', savedBooking.id)
+        .eq('user_id', userId)
         .select('id, enquiry_id, status, total_price, created_at')
         .single()
 
@@ -359,6 +383,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
       await ensureBookingEventLocation({
         bookingId: updatedBooking.id,
         location: enquiry.venue,
+        userId,
       })
       await updateEnquiryStatus({ enquiryId, status: 'booked' })
       await logActivity({
@@ -379,6 +404,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
     await ensureBookingEventLocation({
       bookingId: savedBooking.id,
       location: enquiry.venue,
+      userId,
     })
     await updateEnquiryStatus({ enquiryId, status: 'booked' })
     await logActivity({
@@ -401,6 +427,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
     .insert([
       {
         enquiry_id: enquiryId,
+        user_id: userId,
         status: 'confirmed',
         total_price: 0,
       },
@@ -413,6 +440,7 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
   await ensureBookingEventLocation({
     bookingId: createdBooking.id,
     location: enquiry.venue,
+    userId,
   })
   await updateEnquiryStatus({ enquiryId, status: 'booked' })
   await logActivity({

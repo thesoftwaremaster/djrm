@@ -1,6 +1,7 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
 import { assertCurrentUserCanDelete } from '../utils/demoMode'
+import { getCurrentUserId } from '../utils/tenant'
 
 const getDeleteErrorMessage = (error, fallbackMessage) => {
   if (!error) return fallbackMessage
@@ -21,6 +22,7 @@ const getDeleteErrorMessage = (error, fallbackMessage) => {
 
 export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
   await assertCurrentUserCanDelete()
+  const userId = await getCurrentUserId()
 
   if (!invoiceId) {
     throw new Error('Invoice ID is required.')
@@ -30,6 +32,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     .from('invoices')
     .select('id, status, booking_id, client_id')
     .eq('id', invoiceId)
+    .eq('user_id', userId)
     .single()
 
   if (invoiceError) throw invoiceError
@@ -42,6 +45,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     .from('payments')
     .select('id, paid, amount, type')
     .eq('invoice_id', invoiceId)
+    .eq('user_id', userId)
 
   if (paymentError) throw paymentError
 
@@ -55,6 +59,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     const { data: deletedPayments, error: paymentDeleteError } = await supabase
       .from('payments')
       .delete()
+      .eq('user_id', userId)
       .in('id', paymentIds)
       .select('id')
 
@@ -67,6 +72,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
         .from('payments')
         .select('id, paid, amount, type')
         .eq('invoice_id', invoiceId)
+        .eq('user_id', userId)
 
       if (remainingPaymentError) throw remainingPaymentError
 
@@ -80,6 +86,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     .from('invoice_items')
     .delete()
     .eq('invoice_id', invoiceId)
+    .eq('user_id', userId)
 
   if (itemDeleteError) {
     throw new Error(getDeleteErrorMessage(itemDeleteError, 'Could not delete invoice items.'))
@@ -89,6 +96,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     .from('invoices')
     .delete()
     .eq('id', invoiceId)
+    .eq('user_id', userId)
     .eq('status', 'draft')
     .select('id')
     .maybeSingle()

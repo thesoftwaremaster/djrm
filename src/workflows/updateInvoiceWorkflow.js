@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js'
+import { getCurrentUserId } from '../utils/tenant.js'
 
 const lockedInvoiceStatuses = ['paid', 'cancelled']
 
@@ -40,6 +41,8 @@ export const updateInvoiceDetails = async ({
   tax = 0,
   items = [],
 }) => {
+  const userId = await getCurrentUserId()
+
   if (!invoiceId) {
     throw new Error('Invoice ID is required.')
   }
@@ -93,6 +96,7 @@ export const updateInvoiceDetails = async ({
     .from('invoices')
     .update(invoicePayload)
     .eq('id', invoiceId)
+    .eq('user_id', userId)
     .not('status', 'in', '("paid","cancelled")')
     .select('id')
     .maybeSingle()
@@ -110,6 +114,7 @@ export const updateInvoiceDetails = async ({
         .insert([
           {
             invoice_id: invoiceId,
+            user_id: userId,
             description: item.description,
             quantity: item.quantity,
             unit_price: item.unit_price,
@@ -131,6 +136,7 @@ export const updateInvoiceDetails = async ({
       })
       .eq('id', item.id)
       .eq('invoice_id', invoiceId)
+      .eq('user_id', userId)
       .select('id')
       .maybeSingle()
 

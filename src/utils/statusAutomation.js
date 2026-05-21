@@ -63,10 +63,14 @@ export const syncInvoiceAndBookingStatus = async ({ invoice, payments = [] }) =>
   let bookingStatus = invoice.bookings?.status || null
 
   if (invoiceStatus && invoiceStatus !== invoice.status) {
-    const { error: invoiceUpdateError } = await supabase
+    const invoiceUpdateQuery = supabase
       .from('invoices')
       .update({ status: invoiceStatus })
       .eq('id', invoice.id)
+
+    const { error: invoiceUpdateError } = invoice.user_id
+      ? await invoiceUpdateQuery.eq('user_id', invoice.user_id)
+      : await invoiceUpdateQuery
 
     if (invoiceUpdateError) throw invoiceUpdateError
   }
@@ -77,10 +81,14 @@ export const syncInvoiceAndBookingStatus = async ({ invoice, payments = [] }) =>
     bookingStatus !== 'confirmed' &&
     !protectedBookingStatuses.includes(bookingStatus)
   ) {
-    const { error: bookingUpdateError } = await supabase
+    const bookingUpdateQuery = supabase
       .from('bookings')
       .update({ status: 'confirmed' })
       .eq('id', invoice.booking_id)
+
+    const { error: bookingUpdateError } = invoice.user_id
+      ? await bookingUpdateQuery.eq('user_id', invoice.user_id)
+      : await bookingUpdateQuery
 
     if (bookingUpdateError) throw bookingUpdateError
 

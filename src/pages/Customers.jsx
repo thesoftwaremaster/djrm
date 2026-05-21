@@ -6,6 +6,7 @@ import CustomerList from '../components/CustomerList'
 import TextInput from '../components/ui/TextInput'
 import useDebounce from '../hooks/useDebounce'
 import { isValidEmail } from '../utils/validation'
+import { getCurrentUserId } from '../utils/tenant'
 
 const Customers = () => {
   const location = useLocation()
@@ -27,6 +28,7 @@ const Customers = () => {
 
   const fetchCustomers = async () => {
     setCustomersLoading(true)
+    const userId = await getCurrentUserId()
 
     const { data, error: fetchError } = await supabase
       .from('clients')
@@ -37,6 +39,7 @@ const Customers = () => {
         phone,
         created_at
       `)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (fetchError) {
@@ -109,10 +112,12 @@ const Customers = () => {
     setSuccessMessage('')
 
     try {
+      const userId = await getCurrentUserId()
       const { data: existingCustomers, error: lookupError } = await supabase
         .from('clients')
         .select('id, name, email, phone, created_at')
         .eq('email', normalizedEmail)
+        .eq('user_id', userId)
         .order('created_at', { ascending: true })
         .limit(1)
 
@@ -133,6 +138,7 @@ const Customers = () => {
             name: formValues.name.trim(),
             email: normalizedEmail,
             phone: formValues.phone.trim() || null,
+            user_id: userId,
           },
         ])
 

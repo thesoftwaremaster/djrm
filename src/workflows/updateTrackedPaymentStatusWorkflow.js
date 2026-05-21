@@ -1,7 +1,10 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
+import { getCurrentUserId } from '../utils/tenant'
 
 export const updateTrackedPaymentStatusWorkflow = async ({ paymentId, paid }) => {
+  const userId = await getCurrentUserId()
+
   if (!paymentId) {
     throw new Error('Payment ID is required.')
   }
@@ -14,6 +17,7 @@ export const updateTrackedPaymentStatusWorkflow = async ({ paymentId, paid }) =>
     .from('payments')
     .select('id, invoice_id, paid, amount, type')
     .eq('id', paymentId)
+    .eq('user_id', userId)
     .single()
 
   if (paymentError) throw paymentError
@@ -22,6 +26,7 @@ export const updateTrackedPaymentStatusWorkflow = async ({ paymentId, paid }) =>
     .from('payments')
     .update({ paid })
     .eq('id', payment.id)
+    .eq('user_id', userId)
     .select('id, invoice_id, paid, amount, type')
     .single()
 
@@ -34,6 +39,7 @@ export const updateTrackedPaymentStatusWorkflow = async ({ paymentId, paid }) =>
       .from('invoices')
       .select('id, booking_id, client_id')
       .eq('id', payment.invoice_id)
+      .eq('user_id', userId)
       .maybeSingle()
 
     if (invoiceError) throw invoiceError
