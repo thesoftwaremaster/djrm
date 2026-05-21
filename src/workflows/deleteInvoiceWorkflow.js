@@ -1,5 +1,6 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
+import { assertCurrentUserCanDelete } from '../utils/demoMode'
 
 const getDeleteErrorMessage = (error, fallbackMessage) => {
   if (!error) return fallbackMessage
@@ -19,6 +20,8 @@ const getDeleteErrorMessage = (error, fallbackMessage) => {
 }
 
 export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
+  await assertCurrentUserCanDelete()
+
   if (!invoiceId) {
     throw new Error('Invoice ID is required.')
   }

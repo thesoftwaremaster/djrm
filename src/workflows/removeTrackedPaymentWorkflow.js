@@ -1,5 +1,6 @@
 import { supabase } from '../supabase'
 import { logActivity } from './activityLogActions'
+import { assertCurrentUserCanDelete } from '../utils/demoMode'
 
 const getDeleteErrorMessage = (error) => {
   if (error?.code === '42501') {
@@ -10,6 +11,8 @@ const getDeleteErrorMessage = (error) => {
 }
 
 export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
+  await assertCurrentUserCanDelete()
+
   if (!paymentId) {
     throw new Error('Payment ID is required.')
   }

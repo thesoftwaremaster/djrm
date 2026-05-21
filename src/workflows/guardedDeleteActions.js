@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { assertCurrentUserCanDelete } from '../utils/demoMode'
 
 const CONTRACT_BUCKET = 'contracts'
 
@@ -65,6 +66,8 @@ export const getCustomerDeleteDependencies = async ({ customerId }) => {
 }
 
 export const deleteCustomerGuarded = async ({ customerId }) => {
+  await assertCurrentUserCanDelete()
+
   const dependencies = await getCustomerDeleteDependencies({ customerId })
 
   if (
@@ -103,6 +106,8 @@ export const getEnquiryDeleteDependencies = async ({ enquiryId }) => {
 }
 
 export const deleteEnquiryGuarded = async ({ enquiryId }) => {
+  await assertCurrentUserCanDelete()
+
   const dependencies = await getEnquiryDeleteDependencies({ enquiryId })
 
   if (dependencies.bookingCount > 0) {
@@ -159,6 +164,8 @@ export const getBookingDeleteDependencies = async ({ bookingId }) => {
 }
 
 export const deleteBookingGuarded = async ({ bookingId }) => {
+  await assertCurrentUserCanDelete()
+
   const { data: invoices, error: invoiceFetchError } = await supabase
     .from('invoices')
     .select('id, status')

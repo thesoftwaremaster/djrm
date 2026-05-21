@@ -18,12 +18,14 @@ import ConfirmDialog from '../components/common/ConfirmDialog'
 import DetailPanel from '../components/common/DetailPanel'
 import CommunicationTemplates from '../components/CommunicationTemplates'
 import RelatedTasks from '../components/RelatedTasks'
+import { useAuth } from '../auth/useAuth'
 import { updateBookingDetails, updateBookingStatus } from '../workflows/enquiryBookingActions'
 import { deleteBookingGuarded, getBookingDeleteDependencies } from '../workflows/guardedDeleteActions'
 import { logActivity } from '../workflows/activityLogActions'
 import { fetchBookingConflicts, getConflictLinkText } from '../utils/bookingConflicts'
 import { fetchAppSettings } from '../utils/appSettings'
 import { isValidDateTimeInput } from '../utils/validation'
+import { DEMO_PROTECTED_MESSAGE } from '../utils/demoMode'
 
 const formatDateTimeLocalValue = (value) => {
   if (!value) return ''
@@ -95,6 +97,7 @@ const getContractFileExtension = (fileName = '') => {
 }
 
 const BookingDetails = () => {
+  const { isDemoMode } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const { id } = useParams()
@@ -595,6 +598,12 @@ ${bookingTemplateData.signOff}`,
     const file = uploadEvent.target.files?.[0] || null
     uploadEvent.target.value = ''
 
+    if (isDemoMode && contract?.file_path) {
+      setActionError(DEMO_PROTECTED_MESSAGE)
+      setSuccessMessage('')
+      return
+    }
+
     const validationError = validateContractFile(file)
 
     if (validationError) {
@@ -713,6 +722,13 @@ ${bookingTemplateData.signOff}`,
   const handleRemoveContract = async () => {
     if (contractRemoveLoading) return
     if (!contract?.id || !contract?.file_path) return
+
+    if (isDemoMode) {
+      setActionError(DEMO_PROTECTED_MESSAGE)
+      setSuccessMessage('')
+      setConfirmRemoveContract(false)
+      return
+    }
 
     setContractRemoveLoading(true)
     setActionError('')

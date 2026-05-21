@@ -1,14 +1,42 @@
-﻿import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { Search, Bell, Menu, X, Settings } from 'lucide-react'
 import NavigationSidebar from '../components/NavigationSidebar'
 import { navLinks } from '../constants'
+import { useAuth } from '../auth/useAuth'
+import { ensureDemoSeedData } from '../utils/demoSeed'
 
 const AppLayout = () => {
   const location = useLocation()
+  const { isDemoMode, user } = useAuth()
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const [demoSeedStatus, setDemoSeedStatus] = useState('idle')
 
   const currentPage = navLinks.find((link) => link.path === location.pathname)
+
+  useEffect(() => {
+    if (!isDemoMode || !user?.id || demoSeedStatus !== 'idle') return
+
+    let isMounted = true
+
+    const seedDemoData = async () => {
+      setDemoSeedStatus('loading')
+
+      try {
+        await ensureDemoSeedData(user)
+        if (isMounted) setDemoSeedStatus('ready')
+      } catch (seedError) {
+        console.warn('Demo seed failed:', seedError)
+        if (isMounted) setDemoSeedStatus('error')
+      }
+    }
+
+    void seedDemoData()
+
+    return () => {
+      isMounted = false
+    }
+  }, [demoSeedStatus, isDemoMode, user])
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-app text-text-primary">
@@ -62,6 +90,20 @@ const AppLayout = () => {
 
         <main className="min-w-0 flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6">
           <div className="mx-auto max-w-7xl">
+            {isDemoMode && (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+                Demo Mode — explore freely. Data may reset.
+                {demoSeedStatus === 'loading' && (
+                  <span className="ml-1 font-normal">Preparing demo data...</span>
+                )}
+                {demoSeedStatus === 'error' && (
+                  <span className="ml-1 font-normal">
+                    Demo seed could not finish. Refresh or contact the app owner.
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="mb-4 lg:mb-5">
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
                 Workspace
@@ -72,7 +114,7 @@ const AppLayout = () => {
               </h1>
             </div>
 
-            <Outlet />
+            <Outlet key={isDemoMode ? demoSeedStatus : 'app'} />
           </div>
         </main>
       </div>

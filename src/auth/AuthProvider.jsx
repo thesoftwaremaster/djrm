@@ -2,6 +2,7 @@
 
 import { supabase } from '../supabase'
 import { AuthContext } from './AuthContext'
+import { isDemoUser } from '../utils/demoMode'
 
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null)
@@ -60,6 +61,7 @@ export const AuthProvider = ({ children }) => {
       isAuthenticated: Boolean(session),
       signIn,
       signOut,
+      isDemoMode: isDemoUser(user),
     }),
     [loading, session, signIn, signOut, user]
   )
