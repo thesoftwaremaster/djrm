@@ -98,19 +98,22 @@ declare
   tester_booking_id uuid;
   tester_invoice_id uuid;
   previous_request_sub text;
+  seed_result text := 'Tester seed data ensured for tester@djrm.co.';
 begin
-  select id into tester_user_id
-  from auth.users
-  where lower(email) = 'tester@djrm.co'
-  order by created_at asc
-  limit 1;
-
-  if tester_user_id is null then
-    return 'Skipped: create tester@djrm.co in Supabase Auth first, then run select public.seed_tester_crm_data();';
-  end if;
-
   previous_request_sub := current_setting('request.jwt.claim.sub', true);
-  perform set_config('request.jwt.claim.sub', tester_user_id::text, true);
+
+  begin
+    select id into tester_user_id
+    from auth.users
+    where lower(email) = 'tester@djrm.co'
+    order by created_at asc
+    limit 1;
+
+    if tester_user_id is null then
+      return 'Skipped: create tester@djrm.co in Supabase Auth first, then run select public.seed_tester_crm_data();';
+    end if;
+
+    perform set_config('request.jwt.claim.sub', tester_user_id::text, true);
 
   select id into tester_client_id
   from public.clients
@@ -131,7 +134,9 @@ begin
   end if;
 
   if tester_client_id is null then
-    return 'Skipped: tester client could not be created.';
+    seed_result := 'Skipped: tester client could not be created.';
+    perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
+    return seed_result;
   end if;
 
   select id into tester_enquiry_id
@@ -165,7 +170,9 @@ begin
   end if;
 
   if tester_enquiry_id is null then
-    return 'Skipped: tester enquiry could not be created.';
+    seed_result := 'Skipped: tester enquiry could not be created.';
+    perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
+    return seed_result;
   end if;
 
   select id into tester_booking_id
@@ -187,7 +194,9 @@ begin
   end if;
 
   if tester_booking_id is null then
-    return 'Skipped: tester booking could not be created.';
+    seed_result := 'Skipped: tester booking could not be created.';
+    perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
+    return seed_result;
   end if;
 
   if not exists (
@@ -331,11 +340,19 @@ begin
     );
   end if;
 
-  perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
-
-  return 'Tester seed data ensured for tester@djrm.co.';
+    perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
+    return seed_result;
+  exception
+    when others then
+      perform set_config('request.jwt.claim.sub', coalesce(previous_request_sub, ''), true);
+      raise;
+  end;
 end;
 $$;
 
 comment on function public.seed_tester_crm_data() is
   'Optional tester seed helper. Create tester@djrm.co in Supabase Auth first, then run select public.seed_tester_crm_data();';
+
+revoke all on function public.seed_tester_crm_data() from public;
+revoke all on function public.seed_tester_crm_data() from anon;
+revoke all on function public.seed_tester_crm_data() from authenticated;

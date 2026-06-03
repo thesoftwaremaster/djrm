@@ -37,6 +37,8 @@ The seed creates records clearly marked with `TESTER`, including:
 
 The helper only assigns records to the Auth id for `tester@djrm.co`. It does not assign existing personal records to the tester, and it is safe to run more than once.
 
+The helper is not called by the app and should not be executable by `anon` or `authenticated` API roles. It is intended as a maintainer-only SQL action from the dashboard or service-role context.
+
 ## Existing Personal Data
 
 The tenant migration intentionally leaves any unowned historical rows untouched. Assign existing rows only after confirming the correct personal Auth user id.
