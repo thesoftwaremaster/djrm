@@ -20,6 +20,10 @@ Client → Enquiry → Booking → Invoice → Payment
 
 Bookings represent jobs/work already converted from enquiries.
 
+Core CRM tables are isolated by `user_id`, which stores the authenticated
+Supabase Auth user id. Browser RLS policies require `user_id = auth.uid()` for
+reads and writes.
+
 ---
 
 ## Table Relationships
@@ -31,6 +35,7 @@ Represents a person or company customer.
 Key fields:
 
 * `id`
+* `user_id`
 * `name`
 * `email`
 * `phone`
@@ -49,6 +54,7 @@ Represents a lead/opportunity before or during conversion.
 Key fields:
 
 * `id`
+* `user_id`
 * `client_id`
 * `event_type`
 * `event_date`
@@ -85,6 +91,7 @@ Represents an active/confirmed job created from an enquiry.
 Key fields:
 
 * `id`
+* `user_id`
 * `enquiry_id`
 * `status`
 * `total_price`
@@ -118,6 +125,7 @@ Represents timing/location information for a booking.
 Key fields:
 
 * `id`
+* `user_id`
 * `booking_id`
 * `location`
 * `start_time`
@@ -144,6 +152,7 @@ Represents billing for a client/booking.
 Key fields:
 
 * `id`
+* `user_id`
 * `client_id`
 * `booking_id`
 * `invoice_number`
@@ -203,6 +212,7 @@ Represents line items on an invoice.
 Key fields:
 
 * `id`
+* `user_id`
 * `invoice_id`
 * `description`
 * `quantity`
@@ -227,6 +237,7 @@ Represents money received against invoices/bookings.
 Key fields:
 
 * `id`
+* `user_id`
 * `booking_id`
 * `invoice_id`
 * `amount`
@@ -261,6 +272,7 @@ Represents the current uploaded contract metadata for a booking.
 Key fields:
 
 * `id`
+* `user_id`
 * `booking_id`
 * `file_name`
 * `file_path`
@@ -279,6 +291,7 @@ Status values used:
 Notes:
 
 * contract files are stored in Supabase Storage, not directly in table columns
+* storage paths are scoped by user: `{auth.uid()}/{booking_id}/{timestamp}-{file_name}`
 * only the current contract metadata is shown for each booking
 * if no contract row exists, the UI should show `Not uploaded`
 
@@ -291,6 +304,7 @@ Represents lightweight business activity/history.
 Key fields:
 
 * `id`
+* `user_id`
 * `entity_type`
 * `entity_id`
 * `booking_id`
@@ -357,7 +371,7 @@ Future note:
 Booking contracts use:
 
 * private Supabase Storage bucket: `contracts`
-* object path: `{booking_id}/{timestamp}-{file_name}`
+* object path: `{auth.uid()}/{booking_id}/{timestamp}-{file_name}`
 * metadata table: `booking_contracts`
 
 When a contract is uploaded:
@@ -478,3 +492,7 @@ The CRM is built around this chain:
 * Payments roll up into invoice status and dashboard revenue
 
 Any future feature should respect that chain.
+
+## Tester Account
+
+See `docs/tester-account.md` for creating `tester@djrm.co`, optional tester seed data, and the manual isolation checklist.

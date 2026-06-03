@@ -4,11 +4,12 @@ import PrimaryButton from '../components/ui/PrimaryButton'
 import { eventTypes } from '../constants'
 import { isValidDateInput, isValidEmail } from '../utils/validation'
 
-const defaultItem = {
+const createDefaultItem = () => ({
+  clientKey: `item-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   description: '',
   quantity: 1,
   unit_price: '',
-}
+})
 
 const selectClass =
   'h-11 w-full min-w-0 rounded-2xl border border-border-soft bg-surface px-3.5 text-base text-text-primary outline-none transition focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100 sm:text-sm'
@@ -32,7 +33,7 @@ const InvoiceForm = ({
   const [eventDate, setEventDate] = useState(initialContext?.eventDate || '')
   const [venue, setVenue] = useState(initialContext?.venue || '')
   const [dueDate, setDueDate] = useState('')
-  const [items, setItems] = useState([{ ...defaultItem }])
+  const [items, setItems] = useState([createDefaultItem()])
   const [errorMessage, setErrorMessage] = useState('')
 
   const selectedCustomer = useMemo(() => {
@@ -100,7 +101,7 @@ const InvoiceForm = ({
     setEventDate(initialContext?.eventDate || '')
     setVenue(initialContext?.venue || '')
     setDueDate('')
-    setItems([{ ...defaultItem }])
+    setItems([createDefaultItem()])
   }
 
   const updateItem = (index, updates) => {
@@ -112,7 +113,7 @@ const InvoiceForm = ({
   }
 
   const addItem = () => {
-    setItems((currentItems) => [...currentItems, { ...defaultItem }])
+    setItems((currentItems) => [...currentItems, createDefaultItem()])
   }
 
   const removeItem = (index) => {
@@ -149,8 +150,18 @@ const InvoiceForm = ({
       return
     }
 
+    if (!clientEmail.trim()) {
+      setErrorMessage('Client email is required.')
+      return
+    }
+
     if (!isValidEmail(clientEmail)) {
       setErrorMessage('Enter a valid client email address.')
+      return
+    }
+
+    if (isBookingContext && !initialContext?.bookingId) {
+      setErrorMessage('This invoice needs a linked booking. Return to the booking and try again.')
       return
     }
 
@@ -377,7 +388,7 @@ const InvoiceForm = ({
 
           return (
             <div
-              key={index}
+              key={currentItem.clientKey}
               className="rounded-2xl border border-border-soft bg-surface p-4"
             >
               <div className="grid grid-cols-1 gap-4">

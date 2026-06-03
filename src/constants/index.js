@@ -44,6 +44,16 @@ export const navLinks = [
     title: "Settings",
     path: "/settings",
   },
+  {
+    id: "security",
+    title: "Security",
+    path: "/security",
+  },
+  {
+    id: "help",
+    title: "Help",
+    path: "/help",
+  },
 ];
 
 export const eventTypes = [

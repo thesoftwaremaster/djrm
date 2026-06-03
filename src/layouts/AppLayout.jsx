@@ -8,7 +8,7 @@ import { ensureDemoSeedData } from '../utils/demoSeed'
 
 const AppLayout = () => {
   const location = useLocation()
-  const { isDemoMode, user } = useAuth()
+  const { isDemoMode, isTesterMode, user } = useAuth()
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
   const [demoSeedStatus, setDemoSeedStatus] = useState('idle')
 
@@ -92,7 +92,7 @@ const AppLayout = () => {
           <div className="mx-auto max-w-7xl">
             {isDemoMode && (
               <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-                Demo Mode — explore freely. Data may reset.
+                Demo Mode - explore freely. Data may reset.
                 {demoSeedStatus === 'loading' && (
                   <span className="ml-1 font-normal">Preparing demo data...</span>
                 )}
@@ -101,6 +101,12 @@ const AppLayout = () => {
                     Demo seed could not finish. Refresh or contact the app owner.
                   </span>
                 )}
+              </div>
+            )}
+
+            {isTesterMode && (
+              <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
+                Tester Mode - your data is isolated and can be edited safely.
               </div>
             )}
 

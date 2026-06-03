@@ -28,30 +28,33 @@ const Customers = () => {
 
   const fetchCustomers = async () => {
     setCustomersLoading(true)
-    const userId = await getCurrentUserId()
 
-    const { data, error: fetchError } = await supabase
-      .from('clients')
-      .select(`
-        id,
-        name,
-        email,
-        phone,
-        created_at
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+    try {
+      const userId = await getCurrentUserId()
 
-    if (fetchError) {
+      const { data, error: fetchError } = await supabase
+        .from('clients')
+        .select(`
+          id,
+          name,
+          email,
+          phone,
+          created_at
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (fetchError) throw fetchError
+
+      setError('')
+      setCustomers(data || [])
+    } catch (fetchError) {
       console.error(fetchError)
-      setError('Could not load customers.')
+      setCustomers([])
+      setError(fetchError.message || 'Could not load customers.')
+    } finally {
       setCustomersLoading(false)
-      return
     }
-
-    setError('')
-    setCustomers(data || [])
-    setCustomersLoading(false)
   }
 
   useEffect(() => {
@@ -124,7 +127,7 @@ const Customers = () => {
       if (lookupError) throw lookupError
 
       if (existingCustomers?.[0]) {
-        setSuccessMessage('Customer already exists. Showing the existing record.')
+        setSuccessMessage('A customer with this email already exists. Showing the existing record.')
         setSearchTerm(existingCustomers[0].email || normalizedEmail)
         setFormValues({ name: '', email: '', phone: '' })
         await fetchCustomers()

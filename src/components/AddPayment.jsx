@@ -21,6 +21,7 @@ const AddPayment = ({ invoiceId, bookingId, remainingBalance, onSuccess }) => {
     if (loading) return
 
     const parsedAmount = Number(amount)
+    const remainingAmount = Number(remainingBalance)
 
     if (!invoiceId) {
       setErrorMessage('Open a valid invoice before adding a payment.')
@@ -32,7 +33,12 @@ const AddPayment = ({ invoiceId, bookingId, remainingBalance, onSuccess }) => {
       return
     }
 
-    if (Number.isFinite(Number(remainingBalance)) && parsedAmount > Number(remainingBalance)) {
+    if (Number.isFinite(remainingAmount) && remainingAmount <= 0) {
+      setErrorMessage('This invoice has no remaining balance to pay.')
+      return
+    }
+
+    if (Number.isFinite(remainingAmount) && parsedAmount > remainingAmount) {
       setErrorMessage('Payment amount cannot be greater than the remaining invoice balance.')
       return
     }

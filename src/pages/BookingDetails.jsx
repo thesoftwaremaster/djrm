@@ -431,6 +431,7 @@ ${bookingTemplateData.signOff}`,
 
   const handleStatusChange = async (event) => {
     if (statusLoading) return
+    if (!booking) return
 
     const nextStatus = event.target.value
 
@@ -594,6 +595,7 @@ ${bookingTemplateData.signOff}`,
 
   const handleContractUpload = async (uploadEvent) => {
     if (contractLoading) return
+    if (!booking) return
 
     const file = uploadEvent.target.files?.[0] || null
     uploadEvent.target.value = ''
@@ -623,6 +625,10 @@ ${bookingTemplateData.signOff}`,
       }
 
       const safeFileName = sanitizeContractFileName(file.name)
+      if (!safeFileName) {
+        throw new Error('Contract file name is not valid.')
+      }
+
       const filePath = `${user.id}/${booking.id}/${Date.now()}-${safeFileName}`
       const previousFilePath = contract?.file_path || null
 

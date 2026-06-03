@@ -48,6 +48,19 @@ const getBookingDateKey = (booking) => {
 
 const getTaskKey = (task) => `${task.source}|${task.entity_type}|${task.entity_id}`
 
+const dedupeGeneratedTasks = (tasks) => {
+  const taskByKey = new Map()
+
+  tasks.forEach((task) => {
+    const key = getTaskKey(task)
+    if (!taskByKey.has(key)) {
+      taskByKey.set(key, task)
+    }
+  })
+
+  return [...taskByKey.values()]
+}
+
 const getTaskLinkFields = (booking) => ({
   booking_id: booking.id,
   client_id: booking.enquiries?.clients?.id || null,
@@ -276,12 +289,12 @@ export const refreshOperationalTasks = async () => {
     ...booking,
     event: eventsByBookingId[booking.id] || null,
   }))
-  const generatedTasks = buildGeneratedTasks({
+  const generatedTasks = dedupeGeneratedTasks(buildGeneratedTasks({
     bookings,
     contracts: contractsResponse.data || [],
     invoices: invoicesResponse.data || [],
     payments: paymentsResponse.data || [],
-  })
+  }))
   const generatedTaskKeys = new Set(generatedTasks.map(getTaskKey))
   const existingTasks = existingTasksResponse.data || []
   const existingTaskByKey = existingTasks.reduce((groupedTasks, task) => ({

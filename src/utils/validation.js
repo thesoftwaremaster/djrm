@@ -25,3 +25,15 @@ export const isValidDateTimeInput = (value = '') => {
   const parsedDate = new Date(value)
   return !Number.isNaN(parsedDate.getTime())
 }
+
+export const isValidHttpUrl = (value = '') => {
+  const trimmedValue = value.trim()
+  if (!trimmedValue) return true
+
+  try {
+    const parsedUrl = new URL(trimmedValue)
+    return ['http:', 'https:'].includes(parsedUrl.protocol)
+  } catch {
+    return false
+  }
+}

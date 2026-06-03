@@ -3,6 +3,7 @@
 import { supabase } from '../supabase'
 import { AuthContext } from './AuthContext'
 import { isDemoUser } from '../utils/demoMode'
+import { isTesterUser } from '../utils/testerMode'
 
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null)
@@ -62,6 +63,7 @@ export const AuthProvider = ({ children }) => {
       signIn,
       signOut,
       isDemoMode: isDemoUser(user),
+      isTesterMode: isTesterUser(user),
     }),
     [loading, session, signIn, signOut, user]
   )

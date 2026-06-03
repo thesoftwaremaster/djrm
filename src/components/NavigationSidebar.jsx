@@ -26,8 +26,8 @@ const navLinks = [
 
 const supportLinks = [
   { id: 'settings', title: 'Settings', path: '/settings', icon: Settings },
-  { id: 'security', title: 'Security', icon: Shield },
-  { id: 'help', title: 'Help', icon: HelpCircle },
+  { id: 'security', title: 'Security', path: '/security', icon: Shield },
+  { id: 'help', title: 'Help', path: '/help', icon: HelpCircle },
 ]
 
 const NavigationSidebar = ({ isMobileNavOpen = false, onClose }) => {

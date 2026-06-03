@@ -214,6 +214,10 @@ const createInvoiceWithCurrencyFallback = async (invoicePayload) => {
 
   if (!error) return data
 
+  if (error.code === '23505') {
+    throw new Error('Invoice number is already in use. Choose another number or update Settings next invoice number.')
+  }
+
   if (!isMissingInvoiceCurrencyError(error)) throw error
 
   const { currency, ...payloadWithoutCurrency } = invoicePayload
@@ -222,6 +226,10 @@ const createInvoiceWithCurrencyFallback = async (invoicePayload) => {
     .insert([payloadWithoutCurrency])
     .select()
     .single()
+
+  if (fallbackError?.code === '23505') {
+    throw new Error('Invoice number is already in use. Choose another number or update Settings next invoice number.')
+  }
 
   if (fallbackError) throw fallbackError
 

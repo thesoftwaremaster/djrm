@@ -185,8 +185,14 @@ const EnquiryDetails = () => {
 
   const handleStatusChange = async (event) => {
     if (statusLoading) return
+    if (!enquiry) return
 
     const nextStatus = event.target.value
+
+    if (booking && nextStatus !== 'booked') {
+      setActionError('This enquiry has a linked booking, so its status must stay booked.')
+      return
+    }
 
     setStatusLoading(true)
     setActionError('')

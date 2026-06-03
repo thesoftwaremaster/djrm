@@ -3,7 +3,7 @@ import { Save, Settings as SettingsIcon } from 'lucide-react'
 import { supabase } from '../supabase'
 import { useAuth } from '../auth/useAuth'
 import { isMissingSettingsSchemaError } from '../utils/appSettings'
-import { isValidEmail } from '../utils/validation'
+import { isValidEmail, isValidHttpUrl } from '../utils/validation'
 
 const defaultSettings = {
   business_name: '',
@@ -184,8 +184,8 @@ const Settings = () => {
     }
 
     const taxRate = numberOrNull(formValues.default_tax_rate)
-    if (taxRate === null || taxRate < 0) {
-      return 'Default tax rate must be 0 or more.'
+    if (taxRate === null || taxRate < 0 || taxRate > 100) {
+      return 'Default tax rate must be between 0 and 100.'
     }
 
     const depositPercentage = numberOrNull(formValues.default_deposit_percentage)
@@ -196,6 +196,10 @@ const Settings = () => {
     const eventDuration = numberOrNull(formValues.default_event_duration_hours)
     if (formValues.default_event_duration_hours !== '' && (!eventDuration || eventDuration <= 0)) {
       return 'Default event duration must be greater than 0 hours.'
+    }
+
+    if (formValues.payment_link_url.trim() && !isValidHttpUrl(formValues.payment_link_url)) {
+      return 'Payment link URL must start with http:// or https://.'
     }
 
     return ''

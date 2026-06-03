@@ -271,6 +271,20 @@ const CustomerDetails = () => {
     setSuccessMessage('')
 
     try {
+      const { data: duplicateCustomers, error: duplicateError } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .neq('id', customer.id)
+        .limit(1)
+
+      if (duplicateError) throw duplicateError
+
+      if (duplicateCustomers?.[0]) {
+        setActionError('Another customer already uses this email address.')
+        return
+      }
+
       const { error: updateError } = await supabase
         .from('clients')
         .update({
@@ -427,9 +441,15 @@ const CustomerDetails = () => {
 
     const quantity = Number(contextForm.itemQuantity)
     const unitPrice = Number(contextForm.itemUnitPrice)
+    const selectedBooking = bookings.find((booking) => booking.id === contextForm.bookingId)
 
     if (!contextForm.bookingId) {
       setActionError('Select a booking before creating an invoice.')
+      return
+    }
+
+    if (!selectedBooking) {
+      setActionError('The selected booking is no longer available. Reload this customer and try again.')
       return
     }
 

@@ -26,7 +26,7 @@ Core sensitive tables:
 * The frontend directly reads and writes CRM data
 * The app relies on Supabase RLS to prevent unauthorized access
 * The `send-invoice` Edge Function uses service-role access only after authenticated user verification
-* There is currently no clear multi-tenant ownership model documented (`user_id`, `account_id`, `tenant_id`)
+* Browser-owned CRM rows are isolated by `user_id = auth.uid()`
 
 ---
 
@@ -157,6 +157,8 @@ Check these tables:
 * payments
 * booking_contracts
 * activity_logs
+* tasks
+* communication_templates, uploaded_files, files, and contracts if present
 
 Check Supabase Storage:
 
@@ -170,7 +172,7 @@ For each table verify:
 * RLS is enabled
 * there is no broad `USING (true)` or `WITH CHECK (true)` for `anon`
 * `anon` has no direct CRM read/write access unless explicitly intended
-* `authenticated` access matches the intended model
+* `authenticated` access is scoped to `user_id = auth.uid()`
 * insert policies use `WITH CHECK`
 * update policies restrict who can modify rows
 * delete policies exist only if deliberately needed
@@ -225,7 +227,7 @@ As a normal authenticated user:
 
 * The frontend directly accesses CRM tables, so weak RLS would expose real business/customer data
 * Frontend protected routes improve logged-out UX, but they are not a database security boundary
-* No clear ownership/tenant model is documented
+* Optional future tables must be added to the same `user_id` RLS model before browser access
 * Browser-side status automation depends on RLS being correctly restrictive
 * `send-invoice` currently enforces authenticated user presence, but not app-specific role/tenant ownership
 * Sensitive console logging should be avoided in browser code
@@ -236,13 +238,8 @@ As a normal authenticated user:
 
 1. Review and tighten all Supabase RLS policies
 2. Remove unnecessary sensitive browser logging
-3. Define the intended auth model:
-
-   * internal single-user
-   * trusted team users
-   * multi-tenant SaaS
-4. Add ownership fields if multi-user isolation is needed
-5. Add frontend route protection once auth UX is introduced
+3. Keep public signup disabled unless self-serve onboarding is intentionally supported
+4. Add frontend route protection once auth UX is introduced
 
 ---
 
