@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
-import { Download, FileText, Mail, Wallet, UserRound, BriefcaseBusiness, ReceiptText } from 'lucide-react'
+import { Copy, Download, FileText, Link as LinkIcon, Mail, Wallet, UserRound, BriefcaseBusiness, ReceiptText } from 'lucide-react'
 import { supabase } from '../supabase'
 import AddPayment from '../components/AddPayment'
 import PaymentList from '../components/PaymentList'
@@ -51,8 +51,23 @@ const formatMessageDate = (value) => {
   })
 }
 
+const getFunctionErrorMessage = async (functionError, fallbackMessage) => {
+  let errorMessage = functionError?.message || fallbackMessage
+
+  if (functionError?.context) {
+    try {
+      const errorBody = await functionError.context.json()
+      errorMessage = errorBody?.error || errorMessage
+    } catch {
+      errorMessage = functionError.message || errorMessage
+    }
+  }
+
+  return errorMessage
+}
+
 const InvoiceDetails = () => {
-  const { user } = useAuth()
+  const { isDemoMode, user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const { id } = useParams()
@@ -72,6 +87,9 @@ const InvoiceDetails = () => {
   const [confirmStatusPaymentId, setConfirmStatusPaymentId] = useState(null)
   const [updatingPaymentId, setUpdatingPaymentId] = useState(null)
   const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [paymentLinkLoading, setPaymentLinkLoading] = useState(false)
+  const [paymentLinkMessage, setPaymentLinkMessage] = useState('')
+  const [paymentLinkError, setPaymentLinkError] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -111,6 +129,15 @@ const InvoiceDetails = () => {
         tax,
         total,
         currency,
+        payment_provider,
+        payment_link_url,
+        payment_session_id,
+        payment_status,
+        amount_paid,
+        balance_due,
+        deposit_amount,
+        deposit_paid_at,
+        paid_at,
         due_date,
         created_at,
         notes,
@@ -152,6 +179,9 @@ const InvoiceDetails = () => {
 
       if (invoiceData) {
         invoiceData.currency = 'GBP'
+        invoiceData.payment_status = invoiceData.payment_status || 'unpaid'
+        invoiceData.amount_paid = invoiceData.amount_paid ?? 0
+        invoiceData.balance_due = invoiceData.balance_due ?? Math.max(0, Number(invoiceData.total || 0))
       }
     }
 
@@ -291,6 +321,16 @@ const InvoiceDetails = () => {
         : ''
 
   const hasRecordedPayments = totalPaid > 0
+  const invoiceAmountPaid = Number(invoice?.amount_paid ?? totalPaid)
+  const invoiceBalanceDue = Math.max(0, Number(invoice?.balance_due ?? remainingBalance))
+  const invoicePaymentStatus = invoice?.payment_status || (
+    invoiceAmountPaid <= 0
+      ? 'unpaid'
+      : invoiceBalanceDue <= 0
+        ? 'paid'
+        : 'partially_paid'
+  )
+  const canCreatePaymentLink = Boolean(invoice?.id && invoiceBalanceDue > 0 && invoice.status !== 'cancelled')
   const hasSentWarning = Boolean(invoice?.sent_at) || invoice?.status === 'sent'
   const showDeleteSection = !isEditing && invoice?.status === 'draft'
 
@@ -438,18 +478,7 @@ ${messageSignOff}`,
       })
 
       if (sendInvoiceError) {
-        let errorMessage = sendInvoiceError.message || 'Could not send invoice email.'
-
-        if (sendInvoiceError.context) {
-          try {
-            const errorBody = await sendInvoiceError.context.json()
-            errorMessage = errorBody?.error || errorMessage
-          } catch {
-            errorMessage = sendInvoiceError.message || errorMessage
-          }
-        }
-
-        throw new Error(errorMessage)
+        throw new Error(await getFunctionErrorMessage(sendInvoiceError, 'Could not send invoice email.'))
       }
 
       if (data?.error) {
@@ -503,6 +532,64 @@ ${messageSignOff}`,
     setConfirmDelete(false)
     syncFormValues()
     setIsEditing(false)
+  }
+
+  const handleCreatePaymentLink = async () => {
+    if (paymentLinkLoading) return
+    if (!invoice) return
+
+    setPaymentLinkLoading(true)
+    setPaymentLinkMessage('')
+    setPaymentLinkError('')
+    setActionError('')
+    setSuccessMessage('')
+    setSendMessage('')
+    setSendError('')
+
+    try {
+      if (isDemoMode) {
+        throw new Error('Demo Mode cannot create real payment sessions.')
+      }
+
+      if (!canCreatePaymentLink) {
+        throw new Error('This invoice does not have a payable balance.')
+      }
+
+      const { data, error: createLinkError } = await supabase.functions.invoke('create-payment-link', {
+        body: { invoiceId: invoice.id },
+      })
+
+      if (createLinkError) {
+        throw new Error(await getFunctionErrorMessage(createLinkError, 'Could not create payment link.'))
+      }
+
+      if (data?.error) {
+        throw new Error(data.error)
+      }
+
+      setPaymentLinkMessage(data?.message || 'Payment link created successfully.')
+      await fetchInvoiceDetails()
+    } catch (createLinkError) {
+      console.error(createLinkError)
+      setPaymentLinkError(createLinkError.message || 'Could not create payment link.')
+    } finally {
+      setPaymentLinkLoading(false)
+    }
+  }
+
+  const handleCopyPaymentLink = async () => {
+    if (!invoice?.payment_link_url) return
+
+    setPaymentLinkMessage('')
+    setPaymentLinkError('')
+
+    try {
+      await navigator.clipboard.writeText(invoice.payment_link_url)
+      setPaymentLinkMessage('Payment link copied.')
+    } catch (copyError) {
+      console.error(copyError)
+      setPaymentLinkError('Could not copy payment link.')
+    }
   }
 
   const handleDelete = async () => {
@@ -1267,6 +1354,79 @@ ${messageSignOff}`,
                 style={{ width: `${paymentProgress}%` }}
               />
             </div>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-border-soft bg-surface px-4 py-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="text-left">
+                <p className="text-sm font-semibold text-text-primary">
+                  Online payment
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Status: {invoicePaymentStatus.replace('_', ' ')}
+                </p>
+              </div>
+
+              <div className="text-left text-sm text-text-secondary sm:text-right">
+                <p>
+                  Paid: {formatMessageCurrency(invoiceAmountPaid, invoice.currency)}
+                </p>
+                <p>
+                  Due: {formatMessageCurrency(invoiceBalanceDue, invoice.currency)}
+                </p>
+              </div>
+            </div>
+
+            {invoice.payment_link_url && (
+              <a
+                href={invoice.payment_link_url}
+                target="_blank"
+                rel="noreferrer"
+                className="mb-4 block truncate rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3 text-sm font-medium text-text-primary transition hover:bg-surface"
+              >
+                {invoice.payment_link_url}
+              </a>
+            )}
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                onClick={handleCreatePaymentLink}
+                disabled={paymentLinkLoading || !canCreatePaymentLink}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+                title={isDemoMode ? 'Demo Mode cannot create real payment sessions.' : ''}
+              >
+                <LinkIcon className="h-4 w-4" />
+                {paymentLinkLoading
+                  ? 'Creating...'
+                  : invoice.payment_link_url
+                    ? 'Refresh payment link'
+                    : 'Create payment link'}
+              </button>
+
+              {invoice.payment_link_url && (
+                <button
+                  type="button"
+                  onClick={handleCopyPaymentLink}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle"
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy payment link
+                </button>
+              )}
+            </div>
+
+            {paymentLinkMessage && (
+              <p className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {paymentLinkMessage}
+              </p>
+            )}
+
+            {paymentLinkError && (
+              <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {paymentLinkError}
+              </p>
+            )}
           </div>
 
           <div className="mb-5 flex flex-col items-stretch gap-3 rounded-2xl border border-border-soft bg-surface px-4 py-4 sm:flex-row sm:items-center sm:justify-between">

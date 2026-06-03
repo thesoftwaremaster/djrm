@@ -80,12 +80,19 @@ Deno.serve(async (req) => {
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
   const fromEmail = Deno.env.get('INVOICE_FROM_EMAIL')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
   if (!resendApiKey || !fromEmail || !supabaseUrl || !anonKey || !serviceRoleKey) {
+    console.error('send-invoice missing required configuration', {
+      hasResendApiKey: Boolean(resendApiKey),
+      hasFromEmail: Boolean(fromEmail),
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasAnonKey: Boolean(anonKey),
+      hasServiceRoleKey: Boolean(serviceRoleKey),
+    })
     return jsonResponse(
-      { error: 'Invoice email service is not configured.' },
+      { error: 'Invoice email service is not configured. Ask the app owner to check Supabase function secrets.' },
       500
     )
   }
@@ -127,6 +134,7 @@ Deno.serve(async (req) => {
   const { data: userData, error: userError } = await authClient.auth.getUser()
 
   if (userError || !userData.user) {
+    console.error('send-invoice auth failed', { message: userError?.message })
     return jsonResponse({ error: 'Authentication is required.' }, 401)
   }
 
@@ -145,6 +153,7 @@ Deno.serve(async (req) => {
       tax,
       total,
       due_date,
+      payment_link_url,
       notes,
       clients (
         name,
@@ -156,8 +165,13 @@ Deno.serve(async (req) => {
     .single()
 
   if (invoiceError || !invoice) {
-    console.error('send-invoice invoice lookup failed')
-    return jsonResponse({ error: 'Could not load invoice.' }, 404)
+    console.error('send-invoice invoice lookup failed', {
+      invoiceId,
+      userId: userData.user.id,
+      message: invoiceError?.message,
+      code: invoiceError?.code,
+    })
+    return jsonResponse({ error: 'Could not load invoice, or you do not have access to it.' }, 404)
   }
 
   const client = Array.isArray(invoice.clients) ? invoice.clients[0] : invoice.clients
@@ -180,7 +194,12 @@ Deno.serve(async (req) => {
     .eq('user_id', userData.user.id)
 
   if (itemsError) {
-    console.error('send-invoice item lookup failed')
+    console.error('send-invoice item lookup failed', {
+      invoiceId,
+      userId: userData.user.id,
+      message: itemsError.message,
+      code: itemsError.code,
+    })
     return jsonResponse({ error: 'Could not load invoice items.' }, 500)
   }
 
@@ -204,6 +223,7 @@ Deno.serve(async (req) => {
     `Tax: ${formatCurrency(invoice.tax)}`,
     `Total: ${formatCurrency(invoice.total)}`,
     `Due date: ${formatDate(invoice.due_date)}`,
+    invoice.payment_link_url ? `Payment link: ${invoice.payment_link_url}` : null,
     '',
     invoice.notes ? `Notes: ${invoice.notes}` : null,
     invoice.notes ? '' : null,
@@ -227,16 +247,18 @@ Deno.serve(async (req) => {
   })
 
   if (!emailResponse.ok) {
+    const providerText = await emailResponse.text().catch(() => '')
     console.error('send-invoice email provider failed', {
       status: emailResponse.status,
+      body: providerText.slice(0, 500),
     })
-    return jsonResponse({ error: 'Could not send invoice email.' }, 502)
+    return jsonResponse({ error: 'Email provider rejected the invoice email. Check Resend sender/domain configuration.' }, 502)
   }
 
   let updatedStatus = invoice.status
 
   if (invoice.status !== 'sent') {
-    const { data: updatedInvoice, error: updateError } = await supabase
+    const { data: updatedInvoice, error: updateError } = await authClient
       .from('invoices')
       .update({ status: 'sent' })
       .eq('id', invoice.id)
@@ -246,7 +268,12 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (updateError) {
-      console.error('send-invoice status update failed')
+      console.error('send-invoice status update failed', {
+        invoiceId: invoice.id,
+        userId: userData.user.id,
+        message: updateError.message,
+        code: updateError.code,
+      })
       return jsonResponse(
         { error: 'Invoice was emailed, but the status could not be updated.' },
         500

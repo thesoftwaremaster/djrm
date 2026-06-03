@@ -7,6 +7,12 @@ const formatCurrency = (value) =>
     currency: 'GBP',
   }).format(Number(value || 0))
 
+const getDisplayStatus = (invoice) => {
+  if (invoice.status === 'paid') return 'paid'
+  if (invoice.payment_status === 'partially_paid') return 'partially paid'
+  return invoice.status
+}
+
 const InvoiceList = ({ invoices = [] }) => {
   if (!invoices.length) {
     return (
@@ -31,7 +37,7 @@ const InvoiceList = ({ invoices = [] }) => {
                   {invoice.clients?.name || 'Unknown client'}
                 </h2>
 
-                <StatusBadge status={invoice.status} />
+                <StatusBadge status={getDisplayStatus(invoice)} />
 
                 {invoice.invoice_number && (
                   <span className="rounded-full border border-border-soft px-2.5 py-1 text-xs font-medium text-text-secondary">
@@ -51,6 +57,11 @@ const InvoiceList = ({ invoices = [] }) => {
               <p className="break-words text-xl font-semibold text-text-primary">
                 {formatCurrency(invoice.total)}
               </p>
+              {invoice.balance_due !== null && invoice.balance_due !== undefined && (
+                <p className="mt-1 text-sm text-text-secondary">
+                  {formatCurrency(invoice.balance_due)} due
+                </p>
+              )}
             </div>
           </div>
         </Link>

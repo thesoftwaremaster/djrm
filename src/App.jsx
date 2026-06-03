@@ -1,5 +1,5 @@
 ﻿import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
 
 import { AuthProvider } from './auth/AuthProvider';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -45,6 +45,7 @@ const App = () => {
                   <Route path="/enquiries" element={<Enquiries />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/bookings" element={<Bookings />} />
+                  <Route path="/jobs" element={<Navigate to="/bookings" replace />} />
                   <Route path="/schedule" element={<Schedule />} />
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/invoices" element={<Invoices />} />
