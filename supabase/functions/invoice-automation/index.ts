@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getContactEmail, renderReceiptEmail } from '../_shared/customer-email-templates.ts'
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) => {
   return new Response(JSON.stringify(body), {
@@ -14,6 +15,20 @@ const formatCurrency = (value: number | string | null | undefined, currency = 'G
     style: 'currency',
     currency: currency || 'GBP',
   }).format(Number(value || 0))
+}
+
+const formatDate = (dateValue: string | null | undefined) => {
+  if (!dateValue) return 'not set'
+
+  const date = new Date(dateValue)
+
+  if (Number.isNaN(date.getTime())) return dateValue
+
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 const isValidEmail = (value: unknown): value is string => {
@@ -36,12 +51,14 @@ const sendEmail = async ({
   to,
   subject,
   text,
+  html,
 }: {
   resendApiKey: string
   fromEmail: string
   to: string
   subject: string
   text: string
+  html?: string
 }) => {
   const emailResponse = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -54,12 +71,40 @@ const sendEmail = async ({
       to: [to],
       subject,
       text,
+      html,
     }),
   })
 
   if (!emailResponse.ok) {
     const providerText = await emailResponse.text().catch(() => '')
     throw new Error(`Email provider rejected message (${emailResponse.status}): ${providerText.slice(0, 200)}`)
+  }
+}
+
+const completeNotification = async ({
+  supabase,
+  invoiceId,
+  notificationField,
+  errorMessage = null,
+}: {
+  supabase: any
+  invoiceId: string
+  notificationField: 'receipt' | 'owner'
+  errorMessage?: string | null
+}) => {
+  const { error } = await supabase.rpc('complete_paid_invoice_notification', {
+    target_invoice_id: invoiceId,
+    notification_field: notificationField,
+    error_message: errorMessage,
+  })
+
+  if (error) {
+    console.error('invoice-automation notification completion failed', {
+      invoiceId,
+      notificationField,
+      message: error.message,
+      code: error.code,
+    })
   }
 }
 
@@ -92,15 +137,23 @@ const processPaidInvoiceNotifications = async ({
       invoice_number,
       total,
       amount_paid,
+      balance_due,
       currency,
+      payment_status,
+      paid_at,
       receipt_sent_at,
+      receipt_send_attempted_at,
+      receipt_send_error,
       owner_notified_at,
+      owner_notification_attempted_at,
+      owner_notification_error,
       clients (
         name,
         email
       )
     `)
     .eq('status', 'paid')
+    .eq('payment_status', 'paid')
     .or('receipt_sent_at.is.null,owner_notified_at.is.null')
     .order('paid_at', { ascending: true, nullsFirst: false })
     .limit(50)
@@ -114,31 +167,69 @@ const processPaidInvoiceNotifications = async ({
     const client = Array.isArray(invoice.clients) ? invoice.clients[0] : invoice.clients
     const invoiceLabel = getInvoiceLabel(invoice)
 
+    if (!invoice.receipt_sent_at && !isValidEmail(client?.email)) {
+      console.error('invoice-automation receipt skipped because client email is invalid', {
+        invoiceId: invoice.id,
+        hasClient: Boolean(client),
+        hasClientEmail: Boolean(client?.email),
+      })
+    }
+
     if (!invoice.receipt_sent_at && isValidEmail(client?.email)) {
       const { data: claimedInvoice, error: claimError } = await supabase.rpc('claim_paid_invoice_notification', {
         target_invoice_id: invoice.id,
-        notification_field: 'receipt_sent_at',
+        notification_field: 'receipt',
       })
 
       if (claimError) throw claimError
 
       if (claimedInvoice === true) {
-        await sendEmail({
-          resendApiKey,
-          fromEmail,
-          to: client.email.trim(),
-          subject: `Payment receipt for ${invoiceLabel}`,
-          text: [
-            `Hello ${client.name || 'there'},`,
-            '',
-            `Thank you, payment has been received for ${invoiceLabel}.`,
-            '',
-            `Amount received: ${formatCurrency(invoice.amount_paid, invoice.currency || 'GBP')}`,
-            '',
-            'Thank you.',
-          ].join('\n'),
-        })
-        receiptCount += 1
+        try {
+          await sendEmail({
+            resendApiKey,
+            fromEmail,
+            to: client.email.trim(),
+            subject: `Payment receipt for ${invoiceLabel}`,
+            text: [
+              `Hello ${client.name || 'there'},`,
+              '',
+              `Thank you, payment has been received for ${invoiceLabel}.`,
+              '',
+              `Amount received: ${formatCurrency(invoice.amount_paid, invoice.currency || 'GBP')}`,
+              `Paid date: ${formatDate(invoice.paid_at)}`,
+              '',
+              'Thank you.',
+            ].join('\n'),
+            html: renderReceiptEmail({
+              clientName: client.name,
+              invoiceNumber: invoiceLabel,
+              amountPaid: formatCurrency(invoice.amount_paid, invoice.currency || 'GBP'),
+              remainingBalance: Number(invoice.balance_due || 0) > 0
+                ? formatCurrency(invoice.balance_due, invoice.currency || 'GBP')
+                : null,
+              paidDate: formatDate(invoice.paid_at),
+              contactEmail: getContactEmail(fromEmail),
+            }),
+          })
+          await completeNotification({
+            supabase,
+            invoiceId: invoice.id,
+            notificationField: 'receipt',
+          })
+          receiptCount += 1
+        } catch (emailError) {
+          const message = emailError instanceof Error ? emailError.message : String(emailError)
+          console.error('invoice-automation receipt email failed', {
+            invoiceId: invoice.id,
+            message,
+          })
+          await completeNotification({
+            supabase,
+            invoiceId: invoice.id,
+            notificationField: 'receipt',
+            errorMessage: message,
+          })
+        }
       }
     }
 
@@ -157,26 +248,45 @@ const processPaidInvoiceNotifications = async ({
 
       const { data: claimedInvoice, error: claimError } = await supabase.rpc('claim_paid_invoice_notification', {
         target_invoice_id: invoice.id,
-        notification_field: 'owner_notified_at',
+        notification_field: 'owner',
       })
 
       if (claimError) throw claimError
 
       if (claimedInvoice === true) {
-        await sendEmail({
-          resendApiKey,
-          fromEmail,
-          to: ownerEmail.trim(),
-          subject: 'Invoice paid',
-          text: [
-            'Invoice paid',
-            '',
-            `${invoiceLabel} has been paid.`,
-            `Amount received: ${formatCurrency(invoice.amount_paid, invoice.currency || 'GBP')}`,
-            `Client: ${client?.name || client?.email || 'Unknown client'}`,
-          ].join('\n'),
-        })
-        ownerNotificationCount += 1
+        try {
+          await sendEmail({
+            resendApiKey,
+            fromEmail,
+            to: ownerEmail.trim(),
+            subject: 'Invoice paid',
+            text: [
+              'Invoice paid',
+              '',
+              `${invoiceLabel} has been paid.`,
+              `Amount received: ${formatCurrency(invoice.amount_paid, invoice.currency || 'GBP')}`,
+              `Client: ${client?.name || client?.email || 'Unknown client'}`,
+            ].join('\n'),
+          })
+          await completeNotification({
+            supabase,
+            invoiceId: invoice.id,
+            notificationField: 'owner',
+          })
+          ownerNotificationCount += 1
+        } catch (emailError) {
+          const message = emailError instanceof Error ? emailError.message : String(emailError)
+          console.error('invoice-automation owner notification email failed', {
+            invoiceId: invoice.id,
+            message,
+          })
+          await completeNotification({
+            supabase,
+            invoiceId: invoice.id,
+            notificationField: 'owner',
+            errorMessage: message,
+          })
+        }
       }
     }
   }

@@ -59,7 +59,9 @@ Copy the webhook signing secret into `STRIPE_WEBHOOK_SIGNING_SECRET`.
 9. The webhook validates the paid amount and currency against `invoice_payment_sessions`.
 10. The webhook records one paid `payments` row through `record_online_invoice_payment`.
 11. Database rollup updates invoice `amount_paid`, `balance_due`, `payment_status`, and `status`.
-12. Paid invoices are activity-logged and receipt/owner emails are sent once, guarded by `receipt_sent_at` and `owner_notified_at`.
+12. Paid invoices are activity-logged and receipt/owner emails are sent once.
+13. Notification attempts are tracked with `receipt_send_attempted_at` / `owner_notification_attempted_at`; success is tracked only after Resend accepts the email with `receipt_sent_at` / `owner_notified_at`.
+14. Last failures are stored in `receipt_send_error` and `owner_notification_error` for retry/debugging.
 
 Frontend redirects are not trusted as proof of payment.
 
@@ -75,7 +77,7 @@ curl -X POST \
   https://YOUR_PROJECT_REF.supabase.co/functions/v1/invoice-automation
 ```
 
-It marks overdue unpaid invoices and sends any missing paid-invoice receipt/owner notifications. It does not send overdue reminder emails to clients.
+It marks overdue unpaid invoices and retries missing paid-invoice receipt/owner notifications where the invoice is paid and the relevant `*_sent_at` field is still null. It does not send overdue reminder emails to clients.
 
 ## Demo And Tester Behavior
 

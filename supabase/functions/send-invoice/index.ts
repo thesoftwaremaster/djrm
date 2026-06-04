@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getContactEmail, renderInvoiceEmail } from '../_shared/customer-email-templates.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -66,6 +67,10 @@ const isValidSender = (value: unknown) => {
 
 const getInvoiceLabel = (invoice: { id: string; invoice_number?: string | null }) => {
   return invoice.invoice_number || `Invoice ${invoice.id.slice(0, 8)}`
+}
+
+const getNestedRecord = (value: unknown) => {
+  return Array.isArray(value) ? value[0] : value
 }
 
 Deno.serve(async (req) => {
@@ -152,7 +157,10 @@ Deno.serve(async (req) => {
       subtotal,
       tax,
       total,
+      amount_paid,
+      balance_due,
       due_date,
+      booking_id,
       payment_link_url,
       notes,
       clients (
@@ -203,7 +211,68 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Could not load invoice items.' }, 500)
   }
 
+  let eventDate: string | null = null
+  let eventType: string | null = null
+
+  if (invoice.booking_id) {
+    const { data: bookingContext, error: bookingContextError } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        enquiries (
+          event_type,
+          event_date
+        )
+      `)
+      .eq('id', invoice.booking_id)
+      .eq('user_id', userData.user.id)
+      .maybeSingle()
+
+    if (bookingContextError) {
+      console.error('send-invoice booking context lookup failed', {
+        invoiceId,
+        bookingId: invoice.booking_id,
+        userId: userData.user.id,
+        message: bookingContextError.message,
+        code: bookingContextError.code,
+      })
+    }
+
+    const enquiry = getNestedRecord(bookingContext?.enquiries) as {
+      event_type?: string | null
+      event_date?: string | null
+    } | null
+
+    eventType = enquiry?.event_type || null
+    eventDate = enquiry?.event_date || null
+
+    const { data: eventContext, error: eventContextError } = await supabase
+      .from('events')
+      .select('start_time')
+      .eq('booking_id', invoice.booking_id)
+      .eq('user_id', userData.user.id)
+      .order('start_time', { ascending: true, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (eventContextError) {
+      console.error('send-invoice event context lookup failed', {
+        invoiceId,
+        bookingId: invoice.booking_id,
+        userId: userData.user.id,
+        message: eventContextError.message,
+        code: eventContextError.code,
+      })
+    }
+
+    eventDate = eventContext?.start_time || eventDate
+  }
+
   const invoiceLabel = getInvoiceLabel(invoice)
+  const balanceDue = Number(invoice.balance_due)
+  const amountDue = Number.isFinite(balanceDue)
+    ? Math.max(0, balanceDue)
+    : Number(invoice.total || 0)
   const itemLines = (items || [])
     .map((item) => {
       return `${item.description || 'Invoice item'} - ${item.quantity || 0} x ${formatCurrency(
@@ -222,7 +291,11 @@ Deno.serve(async (req) => {
     `Subtotal: ${formatCurrency(invoice.subtotal)}`,
     `Tax: ${formatCurrency(invoice.tax)}`,
     `Total: ${formatCurrency(invoice.total)}`,
+    `Amount due: ${formatCurrency(amountDue)}`,
     `Due date: ${formatDate(invoice.due_date)}`,
+    eventDate ? `Event date: ${formatDate(eventDate)}` : null,
+    eventType ? `Event type: ${eventType}` : null,
+    invoice.payment_link_url ? 'Pay online using the secure payment link below.' : null,
     invoice.payment_link_url ? `Payment link: ${invoice.payment_link_url}` : null,
     '',
     invoice.notes ? `Notes: ${invoice.notes}` : null,
@@ -231,6 +304,17 @@ Deno.serve(async (req) => {
   ]
     .filter((line) => line !== null)
     .join('\n')
+
+  const html = renderInvoiceEmail({
+    clientName: client.name,
+    invoiceNumber: invoiceLabel,
+    amountDue: formatCurrency(amountDue),
+    dueDate: formatDate(invoice.due_date),
+    eventDate: eventDate ? formatDate(eventDate) : null,
+    eventType,
+    paymentLink: invoice.payment_link_url,
+    contactEmail: getContactEmail(fromEmail),
+  })
 
   const emailResponse = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -241,8 +325,9 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       from: fromEmail,
       to: [client.email.trim()],
-      subject: `${invoiceLabel} from DJ CRM`,
+      subject: `${invoiceLabel} from DJRM`,
       text,
+      html,
     }),
   })
 
