@@ -9,6 +9,74 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) => {
   })
 }
 
+const formatCurrency = (value: number | string | null | undefined, currency = 'GBP') => {
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: currency || 'GBP',
+  }).format(Number(value || 0))
+}
+
+const formatDate = (dateValue: string | null | undefined) => {
+  if (!dateValue) return 'not set'
+
+  const date = new Date(dateValue)
+
+  if (Number.isNaN(date.getTime())) return dateValue
+
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+const isValidEmail = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+
+  const email = value.trim()
+
+  if (email.length > 254) return false
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+const sendEmail = async ({
+  resendApiKey,
+  fromEmail,
+  to,
+  subject,
+  text,
+}: {
+  resendApiKey: string
+  fromEmail: string
+  to: string
+  subject: string
+  text: string
+}) => {
+  const emailResponse = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [to],
+      subject,
+      text,
+    }),
+  })
+
+  if (!emailResponse.ok) {
+    const providerText = await emailResponse.text().catch(() => '')
+    throw new Error(`Email provider rejected message (${emailResponse.status}): ${providerText.slice(0, 200)}`)
+  }
+}
+
+const getInvoiceLabel = (invoice: { id: string; invoice_number?: string | null }) => {
+  return invoice.invoice_number || `Invoice ${invoice.id.slice(0, 8)}`
+}
+
 const timingSafeEqual = (first: string, second: string) => {
   if (first.length !== second.length) return false
 
@@ -102,6 +170,139 @@ const verifyStripeSignature = async ({
   return signatures.some((signature) => timingSafeEqual(signature, expectedSignature))
 }
 
+const sendPaidInvoiceNotifications = async ({
+  supabase,
+  paymentId,
+  resendApiKey,
+  fromEmail,
+}: {
+  supabase: any
+  paymentId: string
+  resendApiKey: string | null
+  fromEmail: string | null
+}) => {
+  if (!resendApiKey || !fromEmail) {
+    console.warn('stripe-webhook paid invoice email skipped because email is not configured', {
+      hasResendApiKey: Boolean(resendApiKey),
+      hasFromEmail: Boolean(fromEmail),
+    })
+    return
+  }
+
+  const { data: payment, error: paymentError } = await supabase
+    .from('payments')
+    .select(`
+      id,
+      amount,
+      payment_currency,
+      invoice_id,
+      invoices (
+        id,
+        user_id,
+        invoice_number,
+        total,
+        currency,
+        paid_at,
+        receipt_sent_at,
+        owner_notified_at,
+        clients (
+          name,
+          email
+        )
+      )
+    `)
+    .eq('id', paymentId)
+    .single()
+
+  if (paymentError || !payment?.invoices) {
+    console.error('stripe-webhook paid invoice notification lookup failed', {
+      paymentId,
+      message: paymentError?.message,
+      code: paymentError?.code,
+    })
+    return
+  }
+
+  const invoice = Array.isArray(payment.invoices) ? payment.invoices[0] : payment.invoices
+  const client = Array.isArray(invoice.clients) ? invoice.clients[0] : invoice.clients
+  const invoiceLabel = getInvoiceLabel(invoice)
+  const currency = payment.payment_currency || invoice.currency || 'GBP'
+
+  if (!invoice.receipt_sent_at && isValidEmail(client?.email)) {
+    const { data: claimedInvoice, error: claimError } = await supabase.rpc('claim_paid_invoice_notification', {
+      target_invoice_id: invoice.id,
+      notification_field: 'receipt_sent_at',
+    })
+
+    if (claimError) {
+      console.error('stripe-webhook receipt claim failed', {
+        invoiceId: invoice.id,
+        message: claimError.message,
+        code: claimError.code,
+      })
+    } else if (claimedInvoice === true) {
+      await sendEmail({
+        resendApiKey,
+        fromEmail,
+        to: client.email.trim(),
+        subject: `Payment receipt for ${invoiceLabel}`,
+        text: [
+          `Hello ${client.name || 'there'},`,
+          '',
+          `Thank you, payment has been received for ${invoiceLabel}.`,
+          '',
+          `Amount received: ${formatCurrency(payment.amount, currency)}`,
+          `Invoice total: ${formatCurrency(invoice.total, invoice.currency || currency)}`,
+          `Paid date: ${formatDate(invoice.paid_at || new Date().toISOString())}`,
+          '',
+          'Thank you.',
+        ].join('\n'),
+      })
+    }
+  }
+
+  if (!invoice.owner_notified_at) {
+    const { data: ownerData, error: ownerError } = await supabase.auth.admin.getUserById(invoice.user_id)
+    const ownerEmail = ownerData?.user?.email
+
+    if (ownerError || !isValidEmail(ownerEmail)) {
+      console.error('stripe-webhook owner notification lookup failed', {
+        invoiceId: invoice.id,
+        userId: invoice.user_id,
+        message: ownerError?.message,
+      })
+      return
+    }
+
+    const { data: claimedInvoice, error: claimError } = await supabase.rpc('claim_paid_invoice_notification', {
+      target_invoice_id: invoice.id,
+      notification_field: 'owner_notified_at',
+    })
+
+    if (claimError) {
+      console.error('stripe-webhook owner notification claim failed', {
+        invoiceId: invoice.id,
+        message: claimError.message,
+        code: claimError.code,
+      })
+    } else if (claimedInvoice === true) {
+      await sendEmail({
+        resendApiKey,
+        fromEmail,
+        to: ownerEmail.trim(),
+        subject: 'Invoice paid',
+        text: [
+          'Invoice paid',
+          '',
+          `${invoiceLabel} has been paid.`,
+          `Amount received: ${formatCurrency(payment.amount, currency)}`,
+          `Client: ${client?.name || client?.email || 'Unknown client'}`,
+        ].join('\n'),
+      })
+    }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
@@ -110,6 +311,8 @@ Deno.serve(async (req) => {
   const webhookSecret = Deno.env.get('STRIPE_WEBHOOK_SIGNING_SECRET')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const resendApiKey = Deno.env.get('RESEND_API_KEY')
+  const fromEmail = Deno.env.get('INVOICE_FROM_EMAIL')
 
   if (!webhookSecret || !supabaseUrl || !serviceRoleKey) {
     console.error('stripe-webhook missing required configuration', {
@@ -180,6 +383,22 @@ Deno.serve(async (req) => {
       code: error.code,
     })
     return jsonResponse({ error: 'Could not record payment.' }, 500)
+  }
+
+  try {
+    if (typeof data === 'string') {
+      await sendPaidInvoiceNotifications({
+        supabase,
+        paymentId: data,
+        resendApiKey,
+        fromEmail,
+      })
+    }
+  } catch (notificationError) {
+    console.error('stripe-webhook paid invoice notification failed', {
+      paymentId: data,
+      message: notificationError instanceof Error ? notificationError.message : String(notificationError),
+    })
   }
 
   return jsonResponse({

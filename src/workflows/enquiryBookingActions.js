@@ -152,6 +152,20 @@ export const createEnquiryWithCustomer = async ({
 
   if (error) throw error
 
+  await logActivity({
+    entityType: 'enquiry',
+    entityId: enquiry.id,
+    clientId: client.id,
+    action: 'enquiry_created',
+    title: 'Enquiry created',
+    description: `${eventType} enquiry created for ${client.name || client.email}.`,
+    metadata: {
+      enquiry_id: enquiry.id,
+      event_type: eventType,
+      event_date: eventDate || null,
+    },
+  })
+
   return { client, enquiry }
 }
 
@@ -448,8 +462,8 @@ export const convertEnquiryToBooking = async ({ enquiryId }) => {
     entityId: createdBooking.id,
     bookingId: createdBooking.id,
     clientId: enquiry.client_id,
-    action: 'enquiry_converted_to_booking',
-    title: 'Enquiry converted to booking',
+    action: 'booking_created',
+    title: 'Booking created',
     description: 'The enquiry was converted into a confirmed booking.',
     metadata: {
       enquiry_id: enquiryId,

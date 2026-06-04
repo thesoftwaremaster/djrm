@@ -19,10 +19,34 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const parseJsonValue = (value: string) => {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+const parseRequestBody = (rawBody: string) => {
+  const trimmedBody = rawBody.trim()
+
+  if (!trimmedBody) return {}
+
+  const parsedBody = parseJsonValue(trimmedBody)
+
+  if (typeof parsedBody !== 'string') return parsedBody
+
+  const nestedBody = parsedBody.trim()
+
+  if (!nestedBody) return {}
+
+  return parseJsonValue(nestedBody)
+}
+
 const isUuid = (value: unknown): value is string => {
   if (typeof value !== 'string') return false
 
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
   )
 }
@@ -121,15 +145,12 @@ Deno.serve(async (req) => {
     )
   }
 
-  let payload: unknown
+  const rawBody = await req.text().catch(() => '')
+  const payload = parseRequestBody(rawBody)
+  const rawInvoiceId = isPlainObject(payload) ? payload.invoiceId ?? payload.invoice_id : null
+  const invoiceId = typeof rawInvoiceId === 'string' ? rawInvoiceId.trim() : rawInvoiceId
 
-  try {
-    payload = await req.json()
-  } catch {
-    return jsonResponse({ error: 'Invalid request body.' }, 400)
-  }
-
-  if (!isPlainObject(payload) || !isUuid(payload.invoiceId)) {
+  if (!isUuid(invoiceId)) {
     return jsonResponse({ error: 'A valid invoice ID is required.' }, 400)
   }
 
@@ -162,7 +183,6 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey)
-  const invoiceId = payload.invoiceId
 
   const { data: invoice, error: invoiceError } = await supabase
     .from('invoices')

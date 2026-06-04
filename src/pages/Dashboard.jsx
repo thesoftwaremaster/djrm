@@ -217,7 +217,7 @@ const isMissingPaymentDueDateError = (error) => {
 const fetchDashboardPayments = async () => {
   const paymentsWithDueDate = await supabase
     .from('payments')
-    .select('id, amount, paid, type, due_date, invoice_id')
+    .select('id, amount, paid, type, due_date, invoice_id, created_at')
 
   if (!paymentsWithDueDate.error) {
     return paymentsWithDueDate
@@ -233,7 +233,7 @@ const fetchDashboardPayments = async () => {
 
   const fallbackPayments = await supabase
     .from('payments')
-    .select('id, amount, paid, type, invoice_id')
+    .select('id, amount, paid, type, invoice_id, created_at')
 
   if (fallbackPayments.error) {
     return fallbackPayments
@@ -250,12 +250,18 @@ const fetchDashboardPayments = async () => {
 
 const Dashboard = () => {
   const [metrics, setMetrics] = useState({
-    totalEnquiries: 0,
-    upcomingBookings: 0,
-    unpaidInvoices: 0,
-    paidRevenue: 0,
-    outstandingRevenue: 0,
-    missingContracts: 0,
+    revenueThisMonth: 0,
+    revenueThisMonthTrend: '',
+    revenueLast30Days: 0,
+    revenueLast30DaysTrend: '',
+    outstandingBalance: 0,
+    outstandingInvoiceCount: 0,
+    enquiriesThisMonth: 0,
+    enquiriesThisMonthTrend: '',
+    bookingsThisMonth: 0,
+    bookingsThisMonthTrend: '',
+    conversionRate: 0,
+    averageBookingValue: 0,
   })
   const [upcomingBookings, setUpcomingBookings] = useState([])
   const [weeklyBookings, setWeeklyBookings] = useState([])
@@ -281,7 +287,7 @@ const Dashboard = () => {
       contractsResponse,
       activityResponse,
     ] = await Promise.all([
-      supabase.from('enquiries').select('id, status'),
+      supabase.from('enquiries').select('id, status, created_at'),
 
       supabase
         .from('invoices')
@@ -290,6 +296,11 @@ const Dashboard = () => {
           invoice_number,
           status,
           total,
+          amount_paid,
+          balance_due,
+          payment_status,
+          paid_at,
+          created_at,
           due_date,
           client_id,
           booking_id,
@@ -393,13 +404,19 @@ const Dashboard = () => {
 
     const invoicesWithPaymentState = invoices.map((invoice) => {
       const invoicePayments = paymentsByInvoice[invoice.id] || []
-      const totalPaid = getPaidTotal(invoicePayments)
+      const rolledUpPaidTotal = Number(invoice.amount_paid)
+      const totalPaid = Number.isFinite(rolledUpPaidTotal)
+        ? rolledUpPaidTotal
+        : getPaidTotal(invoicePayments)
       const derivedStatus = deriveInvoiceStatus({ invoice, totalPaid })
+      const rolledUpBalance = Number(invoice.balance_due)
 
       return {
         ...invoice,
         totalPaid,
-        outstandingBalance: Math.max(0, Number(invoice.total || 0) - totalPaid),
+        outstandingBalance: Number.isFinite(rolledUpBalance)
+          ? Math.max(0, rolledUpBalance)
+          : Math.max(0, Number(invoice.total || 0) - totalPaid),
         derivedStatus,
       }
     })
@@ -455,15 +472,87 @@ const Dashboard = () => {
         return firstDate - secondDate
       })
 
-    const paidRevenue = payments.reduce((sum, payment) => {
-      if (!payment.paid) return sum
+    const startOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+    const startOfPreviousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+    const startOfLast30Days = new Date(today)
+    startOfLast30Days.setDate(today.getDate() - 30)
+    const startOfPrevious30Days = new Date(today)
+    startOfPrevious30Days.setDate(today.getDate() - 60)
+
+    const isOnOrAfter = (value, startDate) => {
+      if (!value) return false
+
+      const parsedDate = new Date(value)
+
+      return !Number.isNaN(parsedDate.getTime()) && parsedDate >= startDate
+    }
+
+    const isInRange = (value, startDate, endDate) => {
+      if (!value) return false
+
+      const parsedDate = new Date(value)
+
+      return !Number.isNaN(parsedDate.getTime()) && parsedDate >= startDate && parsedDate < endDate
+    }
+
+    const getPercentTrend = (current, previous) => {
+      if (!previous && !current) return 'No change'
+      if (!previous) return '+100%'
+
+      const percent = ((current - previous) / previous) * 100
+      const prefix = percent > 0 ? '+' : ''
+
+      return `${prefix}${Math.round(percent)}%`
+    }
+
+    const paidPayments = payments.filter((payment) => payment.paid)
+    const revenueThisMonth = paidPayments.reduce((sum, payment) => {
+      if (!isOnOrAfter(payment.created_at, startOfThisMonth)) return sum
+      return sum + Number(payment.amount || 0)
+    }, 0)
+    const revenuePreviousMonth = paidPayments.reduce((sum, payment) => {
+      if (!isInRange(payment.created_at, startOfPreviousMonth, startOfThisMonth)) return sum
+      return sum + Number(payment.amount || 0)
+    }, 0)
+    const revenueLast30Days = paidPayments.reduce((sum, payment) => {
+      if (!isOnOrAfter(payment.created_at, startOfLast30Days)) return sum
+      return sum + Number(payment.amount || 0)
+    }, 0)
+    const revenuePrevious30Days = paidPayments.reduce((sum, payment) => {
+      if (!isInRange(payment.created_at, startOfPrevious30Days, startOfLast30Days)) return sum
       return sum + Number(payment.amount || 0)
     }, 0)
 
-    const outstandingRevenue = invoicesWithPaymentState.reduce((sum, invoice) => {
-      if (invoice.derivedStatus === 'cancelled') return sum
+    const outstandingInvoices = invoicesWithPaymentState.filter((invoice) => (
+      invoice.derivedStatus !== 'paid' &&
+      invoice.derivedStatus !== 'cancelled' &&
+      invoice.outstandingBalance > 0
+    ))
+
+    const outstandingBalance = outstandingInvoices.reduce((sum, invoice) => {
       return sum + invoice.outstandingBalance
     }, 0)
+
+    const enquiriesThisMonth = enquiries.filter((enquiry) => (
+      isOnOrAfter(enquiry.created_at, startOfThisMonth)
+    )).length
+    const enquiriesPreviousMonth = enquiries.filter((enquiry) => (
+      isInRange(enquiry.created_at, startOfPreviousMonth, startOfThisMonth)
+    )).length
+    const bookingsThisMonth = bookings.filter((booking) => (
+      isOnOrAfter(booking.created_at, startOfThisMonth)
+    )).length
+    const bookingsPreviousMonth = bookings.filter((booking) => (
+      isInRange(booking.created_at, startOfPreviousMonth, startOfThisMonth)
+    )).length
+    const convertedEnquiries = enquiries.filter((enquiry) => enquiry.status === 'booked').length
+    const conversionRate = enquiries.length
+      ? Math.round((convertedEnquiries / enquiries.length) * 100)
+      : 0
+    const activeBookings = bookings.filter((booking) => booking.status !== 'cancelled')
+    const averageBookingValue = activeBookings.length
+      ? activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0) / activeBookings.length
+      : 0
 
     const eventsByBookingId = events.reduce((groupedEvents, event) => {
       if (!event.booking_id) return groupedEvents
@@ -537,12 +626,18 @@ const Dashboard = () => {
       .slice(0, 6)
 
     setMetrics({
-      totalEnquiries: enquiries.length,
-      upcomingBookings: nextBookings.length,
-      unpaidInvoices: visibleUnpaidInvoices.length,
-      paidRevenue,
-      outstandingRevenue,
-      missingContracts: bookingsMissingContracts.length,
+      revenueThisMonth,
+      revenueThisMonthTrend: getPercentTrend(revenueThisMonth, revenuePreviousMonth),
+      revenueLast30Days,
+      revenueLast30DaysTrend: getPercentTrend(revenueLast30Days, revenuePrevious30Days),
+      outstandingBalance,
+      outstandingInvoiceCount: outstandingInvoices.length,
+      enquiriesThisMonth,
+      enquiriesThisMonthTrend: getPercentTrend(enquiriesThisMonth, enquiriesPreviousMonth),
+      bookingsThisMonth,
+      bookingsThisMonthTrend: getPercentTrend(bookingsThisMonth, bookingsPreviousMonth),
+      conversionRate,
+      averageBookingValue,
     })
 
     setUpcomingBookings(nextBookings)
@@ -581,43 +676,59 @@ const Dashboard = () => {
 
   const metricCards = [
     {
-      label: 'Total enquiries',
-      value: metrics.totalEnquiries,
+      label: 'Revenue this month',
+      value: formatCurrency(metrics.revenueThisMonth),
+      trend: metrics.revenueThisMonthTrend,
+      icon: CircleDollarSign,
+      iconClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    },
+    {
+      label: 'Revenue last 30 days',
+      value: formatCurrency(metrics.revenueLast30Days),
+      trend: metrics.revenueLast30DaysTrend,
+      icon: CircleDollarSign,
+      iconClassName: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+    },
+    {
+      label: 'Outstanding balance',
+      value: formatCurrency(metrics.outstandingBalance),
+      icon: Receipt,
+      iconClassName: 'border-amber-200 bg-amber-50 text-amber-700',
+    },
+    {
+      label: 'Outstanding invoices',
+      value: metrics.outstandingInvoiceCount,
+      icon: FileWarning,
+      iconClassName: metrics.outstandingInvoiceCount > 0
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      valueClassName: metrics.outstandingInvoiceCount > 0 ? 'text-amber-800' : 'text-text-primary',
+    },
+    {
+      label: 'Enquiries this month',
+      value: metrics.enquiriesThisMonth,
+      trend: metrics.enquiriesThisMonthTrend,
       icon: SearchCheck,
       iconClassName: 'border-blue-200 bg-blue-50 text-blue-700',
     },
     {
-      label: 'Upcoming bookings',
-      value: metrics.upcomingBookings,
+      label: 'Bookings this month',
+      value: metrics.bookingsThisMonth,
+      trend: metrics.bookingsThisMonthTrend,
       icon: CalendarClock,
-      iconClassName: 'border-amber-200 bg-amber-50 text-amber-700',
+      iconClassName: 'border-indigo-200 bg-indigo-50 text-indigo-700',
     },
     {
-      label: 'Unpaid invoices',
-      value: metrics.unpaidInvoices,
-      icon: Receipt,
+      label: 'Conversion rate',
+      value: `${metrics.conversionRate}%`,
+      icon: CheckCircle2,
       iconClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     },
     {
-      label: 'Paid revenue',
-      value: formatCurrency(metrics.paidRevenue),
-      icon: CircleDollarSign,
-      iconClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    },
-    {
-      label: 'Outstanding revenue',
-      value: formatCurrency(metrics.outstandingRevenue),
-      icon: CircleDollarSign,
-      iconClassName: 'border-amber-200 bg-amber-50 text-amber-700',
-    },
-    {
-      label: 'Missing contracts',
-      value: metrics.missingContracts,
-      icon: FileWarning,
-      iconClassName: metrics.missingContracts > 0
-        ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      valueClassName: metrics.missingContracts > 0 ? 'text-amber-800' : 'text-[var(--text-primary)]',
+      label: 'Average booking value',
+      value: formatCurrency(metrics.averageBookingValue),
+      icon: BriefcaseBusiness,
+      iconClassName: 'border-slate-200 bg-slate-50 text-slate-700',
     },
   ]
 
@@ -838,7 +949,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-8">
         {metricCards.map((metric) => {
           const Icon = metric.icon
 
@@ -859,6 +970,11 @@ const Dashboard = () => {
               <p className={`mt-1 break-words text-left text-sm font-semibold ${metric.valueClassName || 'text-text-primary'}`}>
                 {dashboardLoading ? '...' : metric.value}
               </p>
+              {metric.trend && !dashboardLoading && (
+                <p className="mt-1 text-left text-[11px] font-medium text-text-muted">
+                  {metric.trend} vs previous period
+                </p>
+              )}
             </div>
           )
         })}

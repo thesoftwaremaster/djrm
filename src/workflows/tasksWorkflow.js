@@ -1,5 +1,6 @@
 import { supabase } from '../supabase'
 import { getCurrentUserId } from '../utils/tenant'
+import { logActivity } from './activityLogActions'
 
 const generatedSources = [
   'generated:missing_contract',
@@ -444,6 +445,22 @@ export const completeTask = async (taskId) => {
     .single()
 
   if (error) throw error
+
+  await logActivity({
+    entityType: 'task',
+    entityId: data.id,
+    bookingId: data.booking_id,
+    clientId: data.client_id,
+    action: 'task_completed',
+    title: 'Task completed',
+    description: data.title || 'A task was completed.',
+    metadata: {
+      task_id: data.id,
+      entity_type: data.entity_type,
+      entity_id: data.entity_id,
+      invoice_id: data.invoice_id,
+    },
+  })
 
   return data
 }
