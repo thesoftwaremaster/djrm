@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getContactEmail, renderReceiptEmail } from '../_shared/customer-email-templates.ts'
+import { getContactEmail, renderOwnerNotificationEmail, renderReceiptEmail } from '../_shared/customer-email-templates.ts'
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) => {
   return new Response(JSON.stringify(body), {
@@ -124,10 +124,12 @@ const processPaidInvoiceNotifications = async ({
   supabase,
   resendApiKey,
   fromEmail,
+  appBaseUrl,
 }: {
   supabase: any
   resendApiKey: string
   fromEmail: string
+  appBaseUrl: string | null
 }) => {
   const { data: invoices, error } = await supabase
     .from('invoices')
@@ -166,6 +168,9 @@ const processPaidInvoiceNotifications = async ({
   for (const invoice of invoices || []) {
     const client = Array.isArray(invoice.clients) ? invoice.clients[0] : invoice.clients
     const invoiceLabel = getInvoiceLabel(invoice)
+    const invoiceUrl = appBaseUrl
+      ? `${appBaseUrl.replace(/\/+$/, '')}/invoices/${invoice.id}`
+      : null
 
     if (!invoice.receipt_sent_at && !isValidEmail(client?.email)) {
       console.error('invoice-automation receipt skipped because client email is invalid', {
@@ -265,8 +270,22 @@ const processPaidInvoiceNotifications = async ({
               '',
               `${invoiceLabel} has been paid.`,
               `Amount received: ${formatCurrency(invoice.amount_paid, invoice.currency || 'GBP')}`,
+              `Invoice total: ${formatCurrency(invoice.total, invoice.currency || 'GBP')}`,
+              `Remaining balance: ${formatCurrency(invoice.balance_due, invoice.currency || 'GBP')}`,
+              `Paid date: ${formatDate(invoice.paid_at)}`,
               `Client: ${client?.name || client?.email || 'Unknown client'}`,
-            ].join('\n'),
+              invoiceUrl ? `Open invoice: ${invoiceUrl}` : null,
+            ].filter((line) => line !== null).join('\n'),
+            html: renderOwnerNotificationEmail({
+              invoiceNumber: invoiceLabel,
+              clientName: client?.name || client?.email || 'Unknown client',
+              amountReceived: formatCurrency(invoice.amount_paid, invoice.currency || 'GBP'),
+              invoiceTotal: formatCurrency(invoice.total, invoice.currency || 'GBP'),
+              remainingBalance: formatCurrency(invoice.balance_due, invoice.currency || 'GBP'),
+              paidDate: formatDate(invoice.paid_at),
+              invoiceUrl,
+              contactEmail: getContactEmail(fromEmail),
+            }),
           })
           await completeNotification({
             supabase,
@@ -312,6 +331,7 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
   const fromEmail = Deno.env.get('INVOICE_FROM_EMAIL')
+  const appBaseUrl = Deno.env.get('APP_BASE_URL')
 
   if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !fromEmail) {
     console.error('invoice-automation missing required configuration', {
@@ -339,6 +359,7 @@ Deno.serve(async (req) => {
       supabase,
       resendApiKey,
       fromEmail,
+      appBaseUrl,
     })
 
     return jsonResponse({

@@ -11,6 +11,7 @@ import {
   Trash2,
   UserCog,
 } from 'lucide-react'
+import { useAuth } from '../auth/useAuth'
 
 const overviewCards = [
   {
@@ -91,6 +92,7 @@ const SectionTitle = ({ title, description }) => (
 )
 
 const Security = () => {
+  const { isDemoMode, isPasswordRecovery, signIn, updatePassword, user } = useAuth()
   const [passwordValues, setPasswordValues] = useState({
     currentPassword: '',
     newPassword: '',
@@ -98,6 +100,7 @@ const Security = () => {
   })
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
 
   const updatePasswordField = (field, value) => {
     setPasswordValues((currentValues) => ({
@@ -108,11 +111,29 @@ const Security = () => {
     setError('')
   }
 
-  const handlePasswordSubmit = (event) => {
+  const handlePasswordSubmit = async (event) => {
     event.preventDefault()
 
-    if (!passwordValues.currentPassword || !passwordValues.newPassword || !passwordValues.confirmPassword) {
-      setError('Enter your current password, new password, and confirmation.')
+    if (passwordLoading) return
+
+    if (isDemoMode) {
+      setError('Demo Mode cannot change account credentials.')
+      setMessage('')
+      return
+    }
+
+    if (!user?.email) {
+      setError('Could not confirm the current signed-in user.')
+      setMessage('')
+      return
+    }
+
+    if ((!isPasswordRecovery && !passwordValues.currentPassword) || !passwordValues.newPassword || !passwordValues.confirmPassword) {
+      setError(
+        isPasswordRecovery
+          ? 'Enter your new password and confirmation.'
+          : 'Enter your current password, new password, and confirmation.'
+      )
       setMessage('')
       return
     }
@@ -129,13 +150,40 @@ const Security = () => {
       return
     }
 
-    setPasswordValues({
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    })
+    setPasswordLoading(true)
     setError('')
-    setMessage('Password update saved locally. Supabase password updates will be connected later.')
+    setMessage('')
+
+    try {
+      if (!isPasswordRecovery) {
+        const { error: signInError } = await signIn({
+          email: user.email,
+          password: passwordValues.currentPassword,
+        })
+
+        if (signInError) {
+          throw new Error('Current password is incorrect.')
+        }
+      }
+
+      const { error: updateError } = await updatePassword({
+        password: passwordValues.newPassword,
+      })
+
+      if (updateError) throw updateError
+
+      setPasswordValues({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      })
+      setMessage('Password updated successfully.')
+    } catch (passwordError) {
+      console.error(passwordError)
+      setError(passwordError.message || 'Could not update password.')
+    } finally {
+      setPasswordLoading(false)
+    }
   }
 
   const showPlaceholder = (text) => {
@@ -192,22 +240,30 @@ const Security = () => {
         <Card>
           <SectionTitle
             title="Account Security"
-            description="Change your password with frontend validation. No authentication update is sent yet."
+            description={
+              isPasswordRecovery
+                ? 'Set a new password from your secure reset link.'
+                : 'Change your password securely through Supabase Auth.'
+            }
           />
 
           <form onSubmit={handlePasswordSubmit} className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Field label="Current password">
-              <input
-                type="password"
-                className={inputClass}
-                value={passwordValues.currentPassword}
-                onChange={(event) => updatePasswordField('currentPassword', event.target.value)}
-              />
-            </Field>
+            {!isPasswordRecovery && (
+              <Field label="Current password">
+                <input
+                  type="password"
+                  className={inputClass}
+                  disabled={passwordLoading || isDemoMode}
+                  value={passwordValues.currentPassword}
+                  onChange={(event) => updatePasswordField('currentPassword', event.target.value)}
+                />
+              </Field>
+            )}
             <Field label="New password">
               <input
                 type="password"
                 className={inputClass}
+                disabled={passwordLoading || isDemoMode}
                 value={passwordValues.newPassword}
                 onChange={(event) => updatePasswordField('newPassword', event.target.value)}
               />
@@ -216,6 +272,7 @@ const Security = () => {
               <input
                 type="password"
                 className={inputClass}
+                disabled={passwordLoading || isDemoMode}
                 value={passwordValues.confirmPassword}
                 onChange={(event) => updatePasswordField('confirmPassword', event.target.value)}
               />
@@ -224,10 +281,11 @@ const Security = () => {
             <div className="md:col-span-3">
               <button
                 type="submit"
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-accent-primary px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700 sm:w-auto"
+                disabled={passwordLoading || isDemoMode}
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-accent-primary px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none sm:w-auto"
               >
                 <Lock className="h-4 w-4" />
-                Save password
+                {passwordLoading ? 'Saving...' : 'Save password'}
               </button>
             </div>
           </form>

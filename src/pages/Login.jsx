@@ -7,23 +7,29 @@ import { useAuth } from '../auth/useAuth'
 const Login = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { isAuthenticated, loading, signIn } = useAuth()
+  const { isAuthenticated, loading, resetPassword, signIn } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
 
-  const redirectTo = location.state?.from?.pathname || '/dashboard'
+  const requestedPath = location.state?.from?.pathname || '/dashboard'
+  const redirectTo = requestedPath.startsWith('/') && requestedPath !== '/login'
+    ? requestedPath
+    : '/dashboard'
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/dashboard', { replace: true })
+      navigate(redirectTo, { replace: true })
     }
-  }, [isAuthenticated, navigate])
+  }, [isAuthenticated, navigate, redirectTo])
 
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
+    setMessage('')
 
     if (!email.trim() || !password) {
       setError('Enter your email and password.')
@@ -47,6 +53,32 @@ const Login = () => {
     navigate(redirectTo, { replace: true })
   }
 
+  const handlePasswordReset = async () => {
+    setError('')
+    setMessage('')
+
+    if (!email.trim()) {
+      setError('Enter your email address, then request a reset link.')
+      return
+    }
+
+    setResetLoading(true)
+
+    const { error: resetError } = await resetPassword({
+      email: email.trim(),
+      redirectTo: `${window.location.origin}/security`,
+    })
+
+    setResetLoading(false)
+
+    if (resetError) {
+      setError(resetError.message || 'Could not send password reset email.')
+      return
+    }
+
+    setMessage('Password reset email sent. Check your inbox for the secure link.')
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-app px-4 text-sm text-text-secondary">
@@ -56,7 +88,7 @@ const Login = () => {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={redirectTo} replace />
   }
 
   return (
@@ -112,6 +144,12 @@ const Login = () => {
             </p>
           )}
 
+          {message && !error && (
+            <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {message}
+            </p>
+          )}
+
           <button
             type="submit"
             disabled={isSubmitting}
@@ -119,6 +157,15 @@ const Login = () => {
           >
             <LogIn className="h-4 w-4" />
             {isSubmitting ? 'Signing in...' : 'Sign in'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePasswordReset}
+            disabled={resetLoading || isSubmitting}
+            className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {resetLoading ? 'Sending reset link...' : 'Send password reset link'}
           </button>
         </form>
       </section>

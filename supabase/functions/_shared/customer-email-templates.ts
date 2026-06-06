@@ -3,9 +3,20 @@ type DetailRow = {
   value: string | null | undefined
 }
 
+type InvoiceLineItem = {
+  description: string
+  quantity: string
+  unitPrice: string
+  lineTotal: string
+}
+
 type InvoiceEmailParams = {
   clientName?: string | null
   invoiceNumber: string
+  lineItems: InvoiceLineItem[]
+  subtotal: string
+  tax: string
+  total: string
   amountDue: string
   dueDate: string
   eventDate?: string | null
@@ -18,8 +29,20 @@ type ReceiptEmailParams = {
   clientName?: string | null
   invoiceNumber: string
   amountPaid: string
+  invoiceTotal: string
   remainingBalance?: string | null
   paidDate: string
+  contactEmail: string
+}
+
+type OwnerNotificationEmailParams = {
+  invoiceNumber: string
+  clientName: string
+  amountReceived: string
+  invoiceTotal: string
+  remainingBalance: string
+  paidDate: string
+  invoiceUrl?: string | null
   contactEmail: string
 }
 
@@ -98,6 +121,9 @@ const renderLayout = ({
                       <div style="display: inline-block; border-radius: 16px; border: 1px solid #dbe3ef; background: #ffffff; padding: 10px 14px; color: #0f172a; font-size: 18px; font-weight: 800; letter-spacing: 1px;">
                         DJRM
                       </div>
+                      <div style="padding-top: 6px; color: #64748b; font-size: 12px; font-weight: 700; letter-spacing: 0; line-height: 18px;">
+                        Professional DJ Business Management
+                      </div>
                     </td>
                   </tr>
                 </table>
@@ -112,6 +138,7 @@ const renderLayout = ({
               <td align="center" style="padding: 18px 10px 0 10px; color: #64748b; font-family: Arial, sans-serif; font-size: 12px; line-height: 18px;">
                 Questions? Reply to this email or contact
                 <a href="mailto:${escapeHtml(contactEmail)}" style="color: #334155; text-decoration: underline;">${escapeHtml(contactEmail)}</a>.
+                <br>Sent securely by DJRM.
               </td>
             </tr>
           </table>
@@ -139,6 +166,10 @@ const renderButton = ({ href, label }: { href: string; label: string }) => {
 export const renderInvoiceEmail = ({
   clientName,
   invoiceNumber,
+  lineItems,
+  subtotal,
+  tax,
+  total,
   amountDue,
   dueDate,
   eventDate,
@@ -148,6 +179,8 @@ export const renderInvoiceEmail = ({
 }: InvoiceEmailParams) => {
   const details = renderDetailRows([
     { label: 'Invoice number', value: invoiceNumber },
+    { label: 'Client', value: clientName || 'Client' },
+    { label: 'Invoice total', value: total },
     { label: 'Amount due', value: amountDue },
     { label: 'Due date', value: dueDate },
     { label: 'Event date', value: eventDate },
@@ -158,20 +191,20 @@ export const renderInvoiceEmail = ({
     ? `
       <tr>
         <td style="padding: 24px 28px 6px 28px;">
-          ${renderButton({ href: paymentLink, label: 'Pay Invoice' })}
+          ${renderButton({ href: paymentLink, label: `Pay ${amountDue} Now` })}
         </td>
       </tr>
       <tr>
         <td style="padding: 12px 28px 26px 28px; color: #64748b; font-family: Arial, sans-serif; font-size: 12px; line-height: 18px; word-break: break-word;">
-          If the button does not work, copy and paste this secure payment link:<br>
-          <a href="${escapeHtml(paymentLink)}" style="color: #334155; text-decoration: underline;">${escapeHtml(paymentLink)}</a>
+          If the button does not work,
+          <a href="${escapeHtml(paymentLink)}" style="color: #334155; font-weight: 700; text-decoration: underline;">open the secure payment page</a>.
         </td>
       </tr>
     `
     : `
       <tr>
         <td style="padding: 20px 28px 26px 28px; color: #64748b; font-family: Arial, sans-serif; font-size: 13px; line-height: 20px;">
-          Payment details are included on your invoice.
+          Payment link not available yet.
         </td>
       </tr>
     `
@@ -183,9 +216,13 @@ export const renderInvoiceEmail = ({
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
         <tr>
           <td style="padding: 30px 28px 8px 28px; font-family: Arial, sans-serif;">
+            <div style="display: inline-block; margin-bottom: 14px; border-radius: 999px; border: 1px solid #fed7aa; background: #fff7ed; padding: 6px 10px; color: #c2410c; font-family: Arial, sans-serif; font-size: 12px; font-weight: 800; line-height: 14px;">
+              Awaiting Payment
+            </div>
             <h1 style="margin: 0; color: #0f172a; font-size: 28px; line-height: 34px; font-weight: 800;">Invoice Ready</h1>
             <p style="margin: 12px 0 0 0; color: #475569; font-size: 15px; line-height: 24px;">
               Hello ${escapeHtml(clientName || 'there')}, your invoice is ready to review and pay.
+              A detailed PDF invoice is attached for your records.
             </p>
           </td>
         </tr>
@@ -194,6 +231,11 @@ export const renderInvoiceEmail = ({
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
               ${details}
             </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 18px 28px 0 28px; color: #64748b; font-family: Arial, sans-serif; font-size: 13px; line-height: 20px;">
+            The attached PDF includes ${escapeHtml(lineItems.length || 1)} invoice item${lineItems.length === 1 ? '' : 's'}, subtotal ${escapeHtml(subtotal)}, and tax ${escapeHtml(tax)}.
           </td>
         </tr>
         ${paymentBlock}
@@ -206,6 +248,7 @@ export const renderReceiptEmail = ({
   clientName,
   invoiceNumber,
   amountPaid,
+  invoiceTotal,
   remainingBalance,
   paidDate,
   contactEmail,
@@ -213,6 +256,7 @@ export const renderReceiptEmail = ({
   const details = renderDetailRows([
     { label: 'Invoice number', value: invoiceNumber },
     { label: 'Amount paid', value: amountPaid },
+    { label: 'Invoice total', value: invoiceTotal },
     { label: 'Remaining balance', value: remainingBalance },
     { label: 'Paid date', value: paidDate },
   ])
@@ -230,6 +274,7 @@ export const renderReceiptEmail = ({
         <tr>
           <td style="padding: 28px 28px 8px 28px; font-family: Arial, sans-serif;">
             <h1 style="margin: 0; color: #0f172a; font-size: 26px; line-height: 32px; font-weight: 800;">Thank you</h1>
+            <h2 style="margin: 8px 0 0 0; color: #0f172a; font-size: 20px; line-height: 26px; font-weight: 800;">Payment Received</h2>
             <p style="margin: 12px 0 0 0; color: #475569; font-size: 15px; line-height: 24px;">
               Hello ${escapeHtml(clientName || 'there')}, we have received your payment.
             </p>
@@ -245,6 +290,63 @@ export const renderReceiptEmail = ({
             </p>
           </td>
         </tr>
+      </table>
+    `,
+  })
+}
+
+export const renderOwnerNotificationEmail = ({
+  invoiceNumber,
+  clientName,
+  amountReceived,
+  invoiceTotal,
+  remainingBalance,
+  paidDate,
+  invoiceUrl,
+  contactEmail,
+}: OwnerNotificationEmailParams) => {
+  const details = renderDetailRows([
+    { label: 'Invoice number', value: invoiceNumber },
+    { label: 'Client', value: clientName },
+    { label: 'Amount received', value: amountReceived },
+    { label: 'Invoice total', value: invoiceTotal },
+    { label: 'Remaining balance', value: remainingBalance },
+    { label: 'Paid date', value: paidDate },
+  ])
+
+  return renderLayout({
+    preheader: `${invoiceNumber} has been paid.`,
+    contactEmail,
+    children: `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
+        <tr>
+          <td style="padding: 30px 28px 8px 28px; font-family: Arial, sans-serif;">
+            <h1 style="margin: 0; color: #0f172a; font-size: 26px; line-height: 32px; font-weight: 800;">Invoice Paid</h1>
+            <p style="margin: 12px 0 0 0; color: #475569; font-size: 15px; line-height: 24px;">
+              ${escapeHtml(invoiceNumber)} has been paid by ${escapeHtml(clientName || 'Unknown client')}.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 18px 28px 0 28px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
+              ${details}
+            </table>
+          </td>
+        </tr>
+        ${invoiceUrl ? `
+          <tr>
+            <td style="padding: 24px 28px 28px 28px;">
+              ${renderButton({ href: invoiceUrl, label: 'Open Invoice in DJRM' })}
+            </td>
+          </tr>
+        ` : `
+          <tr>
+            <td style="padding: 14px 28px 28px 28px; color: #64748b; font-family: Arial, sans-serif; font-size: 13px; line-height: 20px;">
+              Open DJRM to review the invoice.
+            </td>
+          </tr>
+        `}
       </table>
     `,
   })

@@ -30,6 +30,8 @@ const defaultSettings = {
   bic_swift: '',
   payment_reference_instructions: '',
   payment_link_url: '',
+  invoice_footer_text: '',
+  invoice_thank_you_message: '',
 }
 
 const numberOrNull = (value) => {
@@ -77,8 +79,7 @@ const Section = ({ title, description, children }) => (
 )
 
 const Settings = () => {
-  const { user } = useAuth()
-  const [settingsId, setSettingsId] = useState(null)
+  const { isDemoMode, isTesterMode, user } = useAuth()
   const [formValues, setFormValues] = useState(defaultSettings)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -89,7 +90,10 @@ const Settings = () => {
     let isMounted = true
 
     const fetchSettings = async () => {
-      if (!user?.id) return
+      if (!user?.id) {
+        setLoading(false)
+        return
+      }
 
       setLoading(true)
       setError('')
@@ -113,7 +117,6 @@ const Settings = () => {
         return
       }
 
-      setSettingsId(data?.id || null)
       setFormValues(normalizeSettings(data || {}))
       setLoading(false)
     }
@@ -165,6 +168,8 @@ const Settings = () => {
     bic_swift: formValues.bic_swift.trim() || null,
     payment_reference_instructions: formValues.payment_reference_instructions.trim() || null,
     payment_link_url: formValues.payment_link_url.trim() || null,
+    invoice_footer_text: formValues.invoice_footer_text.trim() || null,
+    invoice_thank_you_message: formValues.invoice_thank_you_message.trim() || null,
     updated_at: new Date().toISOString(),
   })
 
@@ -223,25 +228,14 @@ const Settings = () => {
 
     try {
       const payload = buildPayload()
-      const query = settingsId
-        ? supabase
-            .from('app_settings')
-            .update(payload)
-            .eq('id', settingsId)
-            .eq('user_id', user.id)
-            .select()
-            .single()
-        : supabase
-            .from('app_settings')
-            .insert([payload])
-            .select()
-            .single()
-
-      const { data, error: saveError } = await query
+      const { data, error: saveError } = await supabase
+        .from('app_settings')
+        .upsert(payload, { onConflict: 'user_id' })
+        .select()
+        .single()
 
       if (saveError) throw saveError
 
-      setSettingsId(data.id)
       setFormValues(normalizeSettings(data))
       setSuccessMessage('Settings saved successfully.')
     } catch (saveError) {
@@ -287,6 +281,24 @@ const Settings = () => {
       {successMessage && !error && (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
           {successMessage}
+        </div>
+      )}
+
+      {isDemoMode && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Demo Mode settings are isolated to the demo account and may reset with demo data.
+        </div>
+      )}
+
+      {isTesterMode && !isDemoMode && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+          Tester Mode settings are isolated to the tester account and will not affect personal or demo data.
+        </div>
+      )}
+
+      {loading && (
+        <div className="rounded-2xl border border-border-soft bg-surface p-4 text-sm text-text-secondary">
+          Loading settings...
         </div>
       )}
 
@@ -553,6 +565,24 @@ const Settings = () => {
               disabled={disabled}
               value={formValues.payment_link_url}
               onChange={(event) => updateField('payment_link_url', event.target.value)}
+            />
+          </Field>
+
+          <Field label="Invoice footer text">
+            <textarea
+              className={textareaClass}
+              disabled={disabled}
+              value={formValues.invoice_footer_text}
+              onChange={(event) => updateField('invoice_footer_text', event.target.value)}
+            />
+          </Field>
+
+          <Field label="Invoice thank-you message">
+            <textarea
+              className={textareaClass}
+              disabled={disabled}
+              value={formValues.invoice_thank_you_message}
+              onChange={(event) => updateField('invoice_thank_you_message', event.target.value)}
             />
           </Field>
         </Section>

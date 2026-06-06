@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getContactEmail, renderReceiptEmail } from '../_shared/customer-email-templates.ts'
+import { getContactEmail, renderOwnerNotificationEmail, renderReceiptEmail } from '../_shared/customer-email-templates.ts'
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) => {
   return new Response(JSON.stringify(body), {
@@ -206,11 +206,13 @@ const sendPaidInvoiceNotifications = async ({
   paymentId,
   resendApiKey,
   fromEmail,
+  appBaseUrl,
 }: {
   supabase: any
   paymentId: string
   resendApiKey: string | null
   fromEmail: string | null
+  appBaseUrl: string | null
 }) => {
   if (!resendApiKey || !fromEmail) {
     console.warn('stripe-webhook paid invoice email skipped because email is not configured', {
@@ -263,6 +265,9 @@ const sendPaidInvoiceNotifications = async ({
   const client = Array.isArray(invoice.clients) ? invoice.clients[0] : invoice.clients
   const invoiceLabel = getInvoiceLabel(invoice)
   const currency = payment.payment_currency || invoice.currency || 'GBP'
+  const invoiceUrl = appBaseUrl
+    ? `${appBaseUrl.replace(/\/+$/, '')}/invoices/${invoice.id}`
+    : null
 
   if (!invoice.receipt_sent_at && !isValidEmail(client?.email)) {
     console.error('stripe-webhook receipt email skipped because client email is invalid', {
@@ -370,8 +375,22 @@ const sendPaidInvoiceNotifications = async ({
             '',
             `${invoiceLabel} has been paid.`,
             `Amount received: ${formatCurrency(payment.amount, currency)}`,
+            `Invoice total: ${formatCurrency(invoice.total, invoice.currency || currency)}`,
+            `Remaining balance: ${formatCurrency(invoice.balance_due, invoice.currency || currency)}`,
+            `Paid date: ${formatDate(invoice.paid_at || new Date().toISOString())}`,
             `Client: ${client?.name || client?.email || 'Unknown client'}`,
-          ].join('\n'),
+            invoiceUrl ? `Open invoice: ${invoiceUrl}` : null,
+          ].filter((line) => line !== null).join('\n'),
+          html: renderOwnerNotificationEmail({
+            invoiceNumber: invoiceLabel,
+            clientName: client?.name || client?.email || 'Unknown client',
+            amountReceived: formatCurrency(payment.amount, currency),
+            invoiceTotal: formatCurrency(invoice.total, invoice.currency || currency),
+            remainingBalance: formatCurrency(invoice.balance_due, invoice.currency || currency),
+            paidDate: formatDate(invoice.paid_at || new Date().toISOString()),
+            invoiceUrl,
+            contactEmail: getContactEmail(fromEmail),
+          }),
         })
         await completeNotification({
           supabase,
@@ -405,6 +424,7 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
   const fromEmail = Deno.env.get('INVOICE_FROM_EMAIL')
+  const appBaseUrl = Deno.env.get('APP_BASE_URL')
 
   if (!webhookSecret || !supabaseUrl || !serviceRoleKey) {
     console.error('stripe-webhook missing required configuration', {
@@ -484,6 +504,7 @@ Deno.serve(async (req) => {
         paymentId: data,
         resendApiKey,
         fromEmail,
+        appBaseUrl,
       })
     }
   } catch (notificationError) {

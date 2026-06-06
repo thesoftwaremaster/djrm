@@ -11,13 +11,20 @@ npx supabase secrets set STRIPE_SECRET_KEY=sk_test_or_live_value
 npx supabase secrets set STRIPE_WEBHOOK_SIGNING_SECRET=whsec_value
 npx supabase secrets set APP_BASE_URL=https://your-app-domain.example
 npx supabase secrets set RESEND_API_KEY=re_value
-npx supabase secrets set INVOICE_FROM_EMAIL="DJ RM <invoices@your-domain.example>"
+npx supabase secrets set INVOICE_FROM_EMAIL="DJRM <invoices@mail.djrmcrm.co.uk>"
 npx supabase secrets set AUTOMATION_SECRET=use_a_long_random_value
 ```
 
 Supabase also provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The functions accept either `SUPABASE_ANON_KEY` or `SUPABASE_PUBLISHABLE_KEY` for caller authentication checks.
 
 Do not put Stripe, Resend, or service-role secrets in frontend code.
+
+Invoice emails are sent by the `send-invoice` Edge Function with:
+
+* a branded HTML summary
+* a plain-text fallback
+* the current Stripe payment link when one exists
+* a generated PDF invoice attachment
 
 ## Functions
 
@@ -53,7 +60,7 @@ Copy the webhook signing secret into `STRIPE_WEBHOOK_SIGNING_SECRET`.
 3. Stripe Checkout creates a hosted payment session for the current database balance due.
 4. The app stores an immutable `invoice_payment_sessions` row with the Stripe session id, expected amount, expected currency, and payment type.
 5. The invoice stores the latest `payment_provider`, `payment_link_url`, and `payment_session_id` for UI/email display.
-6. `send-invoice` includes `payment_link_url` when present.
+6. `send-invoice` includes `payment_link_url` when present and attaches a generated invoice PDF.
 7. Stripe calls `stripe-webhook` after payment.
 8. The webhook verifies the Stripe signature.
 9. The webhook validates the paid amount and currency against `invoice_payment_sessions`.
@@ -93,7 +100,8 @@ It marks overdue unpaid invoices and retries missing paid-invoice receipt/owner 
 * Create a tester invoice.
 * Click `Create payment link`.
 * Confirm invoice stores a Stripe Checkout URL.
-* Click `Send Invoice`; email should include the payment link.
+* Click `Send Invoice`; email should include the payment button and a PDF attachment.
+* Open the PDF attachment and confirm branding, client details, invoice items, totals, balance due, payment methods, and footer are present.
 * Pay with Stripe test card `4242 4242 4242 4242`.
 * Confirm webhook creates a paid payment row.
 * Confirm invoice shows updated amount paid, balance due, and payment status.

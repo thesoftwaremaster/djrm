@@ -81,6 +81,7 @@ const InvoiceDetails = () => {
   const [actionError, setActionError] = useState('')
   const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmSendAgain, setConfirmSendAgain] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [confirmRemovePaymentId, setConfirmRemovePaymentId] = useState(null)
   const [removingPaymentId, setRemovingPaymentId] = useState(null)
@@ -138,6 +139,8 @@ const InvoiceDetails = () => {
         deposit_amount,
         deposit_paid_at,
         paid_at,
+        invoice_sent_at,
+        last_sent_at,
         due_date,
         created_at,
         notes,
@@ -331,7 +334,8 @@ const InvoiceDetails = () => {
         : 'partially_paid'
   )
   const canCreatePaymentLink = Boolean(invoice?.id && invoiceBalanceDue > 0 && invoice.status !== 'cancelled')
-  const hasSentWarning = Boolean(invoice?.sent_at) || invoice?.status === 'sent'
+  const sentAt = invoice?.last_sent_at || invoice?.invoice_sent_at || null
+  const hasSentWarning = Boolean(sentAt) || invoice?.status === 'sent'
   const showDeleteSection = !isEditing && invoice?.status === 'draft'
 
   const getScheduledPaymentAmount = (type) => {
@@ -455,7 +459,7 @@ ${messageSignOff}`,
     return ''
   }
 
-  const handleSendInvoice = async () => {
+  const handleSendInvoice = async ({ forceResend = false } = {}) => {
     if (sendLoading) return
 
     setSendMessage('')
@@ -470,11 +474,17 @@ ${messageSignOff}`,
       return
     }
 
+    if (hasSentWarning && !forceResend) {
+      setConfirmSendAgain(true)
+      return
+    }
+
     setSendLoading(true)
+    setConfirmSendAgain(false)
 
     try {
       const { data, error: sendInvoiceError } = await supabase.functions.invoke('send-invoice', {
-        body: { invoiceId: invoice.id },
+        body: { invoiceId: invoice.id, forceResend },
       })
 
       if (sendInvoiceError) {
@@ -485,7 +495,7 @@ ${messageSignOff}`,
         throw new Error(data.error)
       }
 
-      setSendMessage(data?.message || 'Invoice email sent successfully.')
+      setSendMessage(data?.message || 'Invoice email sent successfully with PDF attached.')
       if (invoice.booking_id) {
         await logActivity({
           entityType: 'invoice',
@@ -516,6 +526,7 @@ ${messageSignOff}`,
     setSendMessage('')
     setSendError('')
     setConfirmDelete(false)
+    setConfirmSendAgain(false)
 
     if (editBlocked) {
       setActionError(editDisabledReason)
@@ -1179,6 +1190,17 @@ ${messageSignOff}`,
         loading={deleteLoading}
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmSendAgain}
+        title="Send invoice again"
+        message={`This invoice was already sent on ${formatMessageDate(sentAt)}. Send again?`}
+        confirmLabel="Send again"
+        loadingLabel="Sending..."
+        loading={sendLoading}
+        onConfirm={() => handleSendInvoice({ forceResend: true })}
+        onCancel={() => setConfirmSendAgain(false)}
       />
 
       <RelatedTasks

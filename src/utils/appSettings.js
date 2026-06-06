@@ -25,6 +25,8 @@ export const defaultAppSettings = {
   bic_swift: '',
   payment_reference_instructions: '',
   payment_link_url: '',
+  invoice_footer_text: '',
+  invoice_thank_you_message: '',
 }
 
 export const isMissingSettingsSchemaError = (error) => {

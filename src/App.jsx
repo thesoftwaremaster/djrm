@@ -56,6 +56,7 @@ const App = () => {
                   <Route path="/enquiries/:id" element={<EnquiryDetails />} />
                   <Route path="/invoices/:id" element={<InvoiceDetails />} />
                   <Route path="/bookings/:id" element={<BookingDetails />} />
+                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 </Route>
               </Route>
             </Routes>

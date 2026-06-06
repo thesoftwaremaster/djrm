@@ -9,6 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
 
   useEffect(() => {
     let isMounted = true
@@ -34,9 +35,10 @@ export const AuthProvider = ({ children }) => {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
       setUser(nextSession?.user || null)
+      setIsPasswordRecovery(event === 'PASSWORD_RECOVERY')
       setLoading(false)
     })
 
@@ -50,6 +52,14 @@ export const AuthProvider = ({ children }) => {
     return supabase.auth.signInWithPassword({ email, password })
   }, [])
 
+  const resetPassword = useCallback(async ({ email, redirectTo }) => {
+    return supabase.auth.resetPasswordForEmail(email, { redirectTo })
+  }, [])
+
+  const updatePassword = useCallback(async ({ password }) => {
+    return supabase.auth.updateUser({ password })
+  }, [])
+
   const signOut = useCallback(async () => {
     return supabase.auth.signOut()
   }, [])
@@ -60,12 +70,15 @@ export const AuthProvider = ({ children }) => {
       user,
       loading,
       isAuthenticated: Boolean(session),
+      isPasswordRecovery,
       signIn,
+      resetPassword,
+      updatePassword,
       signOut,
       isDemoMode: isDemoUser(user),
       isTesterMode: isTesterUser(user),
     }),
-    [loading, session, signIn, signOut, user]
+    [isPasswordRecovery, loading, resetPassword, session, signIn, signOut, updatePassword, user]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
