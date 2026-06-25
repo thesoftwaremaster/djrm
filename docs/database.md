@@ -174,6 +174,7 @@ Status values used:
 
 * `draft`
 * `sent`
+* `part_paid`
 * `paid`
 * `overdue`
 * `cancelled`
@@ -181,6 +182,7 @@ Status values used:
 Automation rules:
 
 * if paid amount >= total, invoice should become `paid`
+* if paid amount is greater than 0 and less than total, invoice should become `part_paid`
 * if unpaid and due_date is in the past, invoice should become `overdue`
 * never overwrite `cancelled`
 

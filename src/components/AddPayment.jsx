@@ -72,6 +72,14 @@ const AddPayment = ({ invoiceId, bookingId, remainingBalance, onSuccess }) => {
 
       if (error) throw error
 
+      const { error: rollupError } = await supabase.rpc('refresh_invoice_payment_rollup', {
+        target_invoice_id: invoiceId,
+      })
+
+      if (rollupError) {
+        console.warn('Invoice payment rollup failed:', rollupError)
+      }
+
       if (bookingId) {
         try {
           await logActivity({

@@ -4,7 +4,7 @@ import { eventTypes } from '../constants'
 import { createEnquiryWithCustomer } from '../workflows/enquiryBookingActions'
 import { isValidDateInput, isValidEmail } from '../utils/validation'
 
-const AddEnquiry = ({ customers = [], onSuccess }) => {
+const AddEnquiry = ({ customers = [], onSuccess, onCancel }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -239,13 +239,26 @@ const AddEnquiry = ({ customers = [], onSuccess }) => {
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? 'Adding enquiry...' : 'Add enquiry'}
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={loading}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex h-11 items-center justify-center rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-36"
+          >
+            {loading ? 'Adding enquiry...' : 'Add enquiry'}
+          </button>
+        </div>
       </div>
     </form>
   )

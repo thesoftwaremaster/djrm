@@ -20,6 +20,63 @@ const getDeleteErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage
 }
 
+export const getInvoiceDeleteDependencies = async ({ invoiceId }) => {
+  if (!invoiceId) {
+    throw new Error('Invoice ID is required.')
+  }
+
+  const { data: invoice, error: invoiceError } = await supabase
+    .from('invoices')
+    .select('id, invoice_number, booking_id')
+    .eq('id', invoiceId)
+    .maybeSingle()
+
+  if (invoiceError) throw invoiceError
+
+  const [
+    { count: paymentCount, error: paymentError },
+    { data: paymentTotals, error: paymentTotalError },
+    { count: itemCount, error: itemError },
+    { count: activityCount, error: activityError },
+  ] = await Promise.all([
+    supabase
+      .from('payments')
+      .select('id', { count: 'exact', head: true })
+      .eq('invoice_id', invoiceId),
+    supabase
+      .from('payments')
+      .select('amount')
+      .eq('invoice_id', invoiceId),
+    supabase
+      .from('invoice_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('invoice_id', invoiceId),
+    supabase
+      .from('activity_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('entity_type', 'invoice')
+      .eq('entity_id', invoiceId),
+  ])
+
+  if (paymentError) throw paymentError
+  if (paymentTotalError) throw paymentTotalError
+  if (itemError) throw itemError
+  if (activityError) throw activityError
+
+  const paymentTotal = (paymentTotals || []).reduce((sum, payment) => {
+    return sum + Number(payment.amount || 0)
+  }, 0)
+
+  return {
+    invoiceNumber: invoice?.invoice_number || '',
+    paymentCount: paymentCount || 0,
+    paymentTotal,
+    itemCount: itemCount || 0,
+    bookingLinkCount: invoice?.booking_id ? 1 : 0,
+    activityLogCount: activityCount || 0,
+  }
+}
+
 export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
   await assertCurrentUserCanDelete()
   const userId = await getCurrentUserId()
@@ -30,16 +87,12 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
 
   const { data: invoice, error: invoiceError } = await supabase
     .from('invoices')
-    .select('id, status, booking_id, client_id')
+    .select('id, invoice_number, status, booking_id, client_id')
     .eq('id', invoiceId)
     .eq('user_id', userId)
     .single()
 
   if (invoiceError) throw invoiceError
-
-  if (invoice.status !== 'draft') {
-    throw new Error(`Only draft invoices can be deleted. Current status: ${invoice.status || 'unknown'}`)
-  }
 
   const { data: payments, error: paymentError } = await supabase
     .from('payments')
@@ -49,11 +102,8 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
 
   if (paymentError) throw paymentError
 
-  if ((payments || []).some((payment) => payment.paid === true)) {
-    throw new Error('Invoices with paid payments cannot be deleted.')
-  }
-
   const paymentIds = (payments || []).map((payment) => payment.id)
+  const paymentTotal = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
   if (paymentIds.length > 0) {
     const { data: deletedPayments, error: paymentDeleteError } = await supabase
@@ -68,17 +118,7 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     }
 
     if ((deletedPayments || []).length !== paymentIds.length) {
-      const { data: remainingPayments, error: remainingPaymentError } = await supabase
-        .from('payments')
-        .select('id, paid, amount, type')
-        .eq('invoice_id', invoiceId)
-        .eq('user_id', userId)
-
-      if (remainingPaymentError) throw remainingPaymentError
-
-      if ((remainingPayments || []).length > 0) {
-        throw new Error('Invoice has linked records in payments.')
-      }
+      throw new Error('One or more linked payments could not be deleted.')
     }
   }
 
@@ -97,7 +137,6 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
     .delete()
     .eq('id', invoiceId)
     .eq('user_id', userId)
-    .eq('status', 'draft')
     .select('id')
     .maybeSingle()
 
@@ -117,7 +156,15 @@ export const deleteInvoiceWorkflow = async ({ invoiceId }) => {
       clientId: invoice.client_id,
       action: 'invoice_deleted',
       title: 'Invoice deleted',
-      description: 'Draft invoice and linked payment records were deleted.',
+      description: paymentIds.length > 0
+        ? 'Invoice, linked payments, and linked invoice items were deleted.'
+        : 'Invoice and linked invoice items were deleted.',
+      metadata: {
+        invoice_id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        deleted_payment_count: paymentIds.length,
+        deleted_payment_total: paymentTotal,
+      },
     })
   } catch (activityLogError) {
     console.warn('Activity log failed:', activityLogError)

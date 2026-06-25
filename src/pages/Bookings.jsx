@@ -1,17 +1,42 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import { BriefcaseBusiness, CalendarDays, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BriefcaseBusiness, CalendarDays, PlusCircle, Search, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import BookingList from '../components/BookingList'
+import DetailPanel from '../components/common/DetailPanel'
 import useDebounce from '../hooks/useDebounce'
+import { eventTypes } from '../constants'
+import { createBookingWithCustomer } from '../workflows/enquiryBookingActions'
+import { isValidDateInput, isValidDateTimeInput, isValidEmail } from '../utils/validation'
+import { getCurrentUserId } from '../utils/tenant'
+
+const initialBookingFormValues = {
+  customerId: '',
+  name: '',
+  email: '',
+  phone: '',
+  eventType: '',
+  eventDate: '',
+  venue: '',
+  status: 'pending',
+  totalPrice: '',
+  startTime: '',
+  endTime: '',
+  notes: '',
+}
 
 const Bookings = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [bookings, setBookings] = useState([])
+  const [customers, setCustomers] = useState([])
   const [error, setError] = useState('')
-  const [successMessage] = useState(location.state?.successMessage || '')
+  const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [bookingsLoading, setBookingsLoading] = useState(true)
+  const [showCreatePanel, setShowCreatePanel] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [formValues, setFormValues] = useState(initialBookingFormValues)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const searchInputRef = useRef(null)
@@ -29,6 +54,10 @@ const Bookings = () => {
         total_price,
         created_at,
         enquiry_id,
+        invoices (
+          id,
+          total
+        ),
         enquiries (
           id,
           event_type,
@@ -47,7 +76,7 @@ const Bookings = () => {
 
     if (fetchError) {
       console.error(fetchError)
-      setError('Could not load bookings.')
+      setError(fetchError.message || 'Could not load bookings.')
       setBookingsLoading(false)
       return
     }
@@ -57,15 +86,171 @@ const Bookings = () => {
     setBookingsLoading(false)
   }
 
+  const fetchCustomers = async () => {
+    try {
+      const userId = await getCurrentUserId()
+      const { data, error: fetchError } = await supabase
+        .from('clients')
+        .select('id, name, email, phone, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (fetchError) throw fetchError
+
+      setCustomers(data || [])
+    } catch (fetchError) {
+      console.error(fetchError)
+      setCustomers([])
+    }
+  }
+
   useEffect(() => {
-    void Promise.resolve().then(() => fetchBookings())
+    void Promise.resolve().then(() => Promise.all([fetchBookings(), fetchCustomers()]))
   }, [])
 
   useEffect(() => {
     if (!location.state?.successMessage) return
 
+    setSuccessMessage(location.state.successMessage)
     navigate(location.pathname, { replace: true, state: {} })
   }, [location.pathname, location.state, navigate])
+
+  const selectedCustomer =
+    customers.find((customer) => customer.id === formValues.customerId) || null
+
+  const matchedCustomer =
+    !selectedCustomer && formValues.email.trim()
+      ? customers.find((customer) => (
+          customer.email?.trim().toLowerCase() === formValues.email.trim().toLowerCase()
+        )) || null
+      : null
+
+  const linkedCustomer = selectedCustomer || matchedCustomer
+
+  const updateFormValue = (field, value) => {
+    setFormValues((currentValues) => ({
+      ...currentValues,
+      [field]: value,
+    }))
+  }
+
+  const handleSelectedCustomerChange = (event) => {
+    const customerId = event.target.value
+    const customer = customers.find((item) => item.id === customerId) || null
+
+    setFormValues((currentValues) => ({
+      ...currentValues,
+      customerId,
+      name: customer?.name || '',
+      email: customer?.email || '',
+      phone: customer?.phone || '',
+    }))
+  }
+
+  const resetCreateForm = () => {
+    setFormValues(initialBookingFormValues)
+    setCreateError('')
+  }
+
+  const handleCreatePanelClose = () => {
+    if (createLoading) return
+
+    setShowCreatePanel(false)
+    resetCreateForm()
+  }
+
+  const handleCreateBooking = async (event) => {
+    event.preventDefault()
+
+    if (createLoading) return
+
+    const normalizedEmail = formValues.email.trim()
+    const totalPrice = formValues.totalPrice.trim() ? Number(formValues.totalPrice) : 0
+
+    if (!selectedCustomer && !matchedCustomer && !formValues.name.trim()) {
+      setCreateError('Customer name is required.')
+      return
+    }
+
+    if (!selectedCustomer && !matchedCustomer && !isValidEmail(normalizedEmail)) {
+      setCreateError('Enter a valid customer email address.')
+      return
+    }
+
+    if (!formValues.eventType.trim()) {
+      setCreateError('Event type is required.')
+      return
+    }
+
+    if (formValues.eventDate && !isValidDateInput(formValues.eventDate)) {
+      setCreateError('Enter a valid event date.')
+      return
+    }
+
+    if (!Number.isFinite(totalPrice) || totalPrice < 0) {
+      setCreateError('Total price must be 0 or more.')
+      return
+    }
+
+    if (!isValidDateTimeInput(formValues.startTime) || !isValidDateTimeInput(formValues.endTime)) {
+      setCreateError('Enter valid event start and end times.')
+      return
+    }
+
+    if (
+      formValues.startTime &&
+      formValues.endTime &&
+      new Date(formValues.endTime) < new Date(formValues.startTime)
+    ) {
+      setCreateError('End time cannot be before start time.')
+      return
+    }
+
+    setCreateLoading(true)
+    setCreateError('')
+    setError('')
+    setSuccessMessage('')
+
+    try {
+      const userId = await getCurrentUserId()
+      const bookingPayload = {
+        clientId: selectedCustomer?.id || matchedCustomer?.id || undefined,
+        name: formValues.name,
+        email: formValues.email,
+        phone: formValues.phone,
+        eventType: formValues.eventType,
+        eventDate: formValues.eventDate,
+        venue: formValues.venue,
+        status: formValues.status,
+        totalPrice,
+        startTime: formValues.startTime,
+        endTime: formValues.endTime,
+        notes: formValues.notes,
+      }
+
+      console.info('[Bookings] create booking current user', { currentUserId: userId })
+      console.info('[Bookings] create booking payload', bookingPayload)
+
+      const result = await createBookingWithCustomer(bookingPayload)
+
+      console.info('[Bookings] create booking response', result)
+
+      setShowCreatePanel(false)
+      resetCreateForm()
+      await Promise.all([fetchBookings(), fetchCustomers()])
+      setSuccessMessage('Booking created successfully.')
+      navigate(`/bookings/${result.booking.id}`, {
+        state: {
+          successMessage: 'Booking created successfully.',
+        },
+      })
+    } catch (createBookingError) {
+      console.error('[Bookings] create booking failed', createBookingError)
+      setCreateError(createBookingError.message || 'Could not create booking.')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
 
   const cardClass =
     'min-w-0 rounded-2xl border border-border-soft bg-surface p-4 shadow-[0_4px_14px_rgba(15,23,42,0.025)] sm:p-5'
@@ -138,13 +323,29 @@ const Bookings = () => {
             </p>
           </div>
 
-          <div className="self-start rounded-2xl border border-border-soft bg-surface-subtle px-5 py-4 text-left md:text-right">
-            <p className="text-xs uppercase tracking-[0.18em] text-text-muted">
-              Total
-            </p>
-            <p className="mt-2 text-2xl font-semibold text-text-primary">
-              {filteredBookings.length}
-            </p>
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row md:flex-col md:items-end">
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
+                setSuccessMessage('')
+                setCreateError('')
+                setShowCreatePanel(true)
+              }}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white shadow-[0_6px_20px_rgba(79,70,229,0.16)] transition hover:bg-indigo-700 sm:w-auto"
+            >
+              <PlusCircle className="h-4 w-4" />
+              New Booking
+            </button>
+
+            <div className="self-start rounded-2xl border border-border-soft bg-surface-subtle px-5 py-4 text-left md:self-auto md:text-right">
+              <p className="text-xs uppercase tracking-[0.18em] text-text-muted">
+                Total
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-text-primary">
+                {filteredBookings.length}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -260,11 +461,240 @@ const Bookings = () => {
           <BookingList bookings={filteredBookings} />
         )}
       </div>
+
+      <DetailPanel
+        open={showCreatePanel}
+        title="New booking"
+        subtitle="Create the required enquiry and booking record for a customer."
+        onClose={handleCreatePanelClose}
+        size="xl"
+      >
+        <form onSubmit={handleCreateBooking} className="space-y-4">
+          {customers.length > 0 && (
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Existing customer
+              </label>
+              <select
+                value={formValues.customerId}
+                onChange={handleSelectedCustomerChange}
+                className={inputClass}
+              >
+                <option value="">Create or match by email</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name} {customer.email ? `(${customer.email})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {linkedCustomer && (
+            <div className="rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3 text-sm text-text-secondary">
+              Using existing customer:{' '}
+              <span className="font-medium text-text-primary">{linkedCustomer.name}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Customer name
+              </label>
+              <input
+                value={formValues.name}
+                onChange={(event) => {
+                  setFormValues((currentValues) => ({
+                    ...currentValues,
+                    customerId: '',
+                    name: event.target.value,
+                  }))
+                }}
+                className={inputClass}
+                placeholder="Customer name"
+                required={!linkedCustomer}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Email address
+              </label>
+              <input
+                type="email"
+                value={formValues.email}
+                onChange={(event) => {
+                  setFormValues((currentValues) => ({
+                    ...currentValues,
+                    customerId: '',
+                    email: event.target.value,
+                  }))
+                }}
+                className={inputClass}
+                placeholder="Email address"
+                required={!linkedCustomer}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Phone optional
+              </label>
+              <input
+                type="tel"
+                value={formValues.phone}
+                onChange={(event) => {
+                  setFormValues((currentValues) => ({
+                    ...currentValues,
+                    customerId: '',
+                    phone: event.target.value,
+                  }))
+                }}
+                className={inputClass}
+                placeholder="Phone number"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Status
+              </label>
+              <select
+                value={formValues.status}
+                onChange={(event) => updateFormValue('status', event.target.value)}
+                className={inputClass}
+              >
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Event type
+              </label>
+              <select
+                value={formValues.eventType}
+                onChange={(event) => updateFormValue('eventType', event.target.value)}
+                className={inputClass}
+                required
+              >
+                <option value="">Select event type</option>
+                {eventTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Event date optional
+              </label>
+              <input
+                type="date"
+                value={formValues.eventDate}
+                onChange={(event) => updateFormValue('eventDate', event.target.value)}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Total price
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formValues.totalPrice}
+                onChange={(event) => updateFormValue('totalPrice', event.target.value)}
+                className={inputClass}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Venue optional
+              </label>
+              <input
+                value={formValues.venue}
+                onChange={(event) => updateFormValue('venue', event.target.value)}
+                className={inputClass}
+                placeholder="Venue or location"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Start optional
+              </label>
+              <input
+                type="datetime-local"
+                value={formValues.startTime}
+                onChange={(event) => updateFormValue('startTime', event.target.value)}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                End optional
+              </label>
+              <input
+                type="datetime-local"
+                value={formValues.endTime}
+                onChange={(event) => updateFormValue('endTime', event.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+              Notes optional
+            </label>
+            <textarea
+              value={formValues.notes}
+              onChange={(event) => updateFormValue('notes', event.target.value)}
+              className="min-h-24 w-full rounded-2xl border border-border-soft bg-surface px-4 py-3 text-sm text-text-primary outline-none transition placeholder:text-text-muted focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              placeholder="Booking notes"
+            />
+          </div>
+
+          {createError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {createError}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={handleCreatePanelClose}
+              disabled={createLoading}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={createLoading}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createLoading ? 'Creating...' : 'Create booking'}
+            </button>
+          </div>
+        </form>
+      </DetailPanel>
     </div>
   )
 }
 
 export default Bookings
-
-
-

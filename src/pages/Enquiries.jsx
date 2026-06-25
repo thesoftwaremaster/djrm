@@ -3,6 +3,7 @@ import { PlusCircle, ArrowRight, Search, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import AddEnquiry from '../components/AddEnquiry'
+import DetailPanel from '../components/common/DetailPanel'
 import EnquiryList from '../components/EnquiryList'
 import useDebounce from '../hooks/useDebounce'
 
@@ -14,6 +15,7 @@ const Enquiries = () => {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [enquiriesLoading, setEnquiriesLoading] = useState(true)
+  const [showCreatePanel, setShowCreatePanel] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const searchInputRef = useRef(null)
@@ -82,6 +84,7 @@ const Enquiries = () => {
     const refreshed = await fetchEnquiries()
 
     if (refreshed) {
+      setShowCreatePanel(false)
       setSuccessMessage('Enquiry created successfully.')
     }
 
@@ -117,6 +120,10 @@ const Enquiries = () => {
   const hasActiveFilters =
     searchTerm.trim() !== '' || statusFilter !== 'active'
 
+  const handleCreatePanelClose = () => {
+    setShowCreatePanel(false)
+  }
+
   const cardClass =
     'min-w-0 rounded-2xl border border-border-soft bg-surface p-4 shadow-[0_4px_14px_rgba(15,23,42,0.025)] sm:p-5'
 
@@ -137,8 +144,7 @@ const Enquiries = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-6">
+      <div className="space-y-6">
           <div className={cardClass}>
             <div className="flex flex-col items-stretch gap-5 md:flex-row md:items-start md:justify-between md:gap-6">
               <div className="min-w-0">
@@ -158,13 +164,28 @@ const Enquiries = () => {
                 </p>
               </div>
 
-              <div className="self-start rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3 text-left md:text-right">
-                <p className="text-xs uppercase tracking-[0.18em] text-text-muted">
-                  Total
-                </p>
-                <p className="mt-1 text-2xl font-semibold text-text-primary">
-                  {filteredEnquiries.length}
-                </p>
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row md:flex-col md:items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('')
+                    setSuccessMessage('')
+                    setShowCreatePanel(true)
+                  }}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white shadow-[0_6px_20px_rgba(79,70,229,0.16)] transition hover:bg-indigo-700 sm:w-auto"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  New enquiry
+                </button>
+
+                <div className="self-start rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3 text-left md:self-auto md:text-right">
+                  <p className="text-xs uppercase tracking-[0.18em] text-text-muted">
+                    Total
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-text-primary">
+                    {filteredEnquiries.length}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -259,30 +280,20 @@ const Enquiries = () => {
               />
             )}
           </div>
-        </div>
-
-        <div className={`${cardClass} xl:sticky xl:top-28`}>
-          <div className="mb-6 flex items-start gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl text-text-primary">
-              <PlusCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="text-left text-sm font-medium text-text-muted">
-                New lead
-              </p>
-              <h2 className="mt-1 text-left text-xl font-semibold tracking-tight text-text-primary">
-                Add enquiry
-              </h2>
-              <p className="mt-2 text-left text-sm leading-6 text-text-secondary">
-                Capture a new lead and create the first step in your pipeline.
-              </p>
-            </div>
-          </div>
-
-          <AddEnquiry customers={customers} onSuccess={handleEnquiryCreated} />
-        </div>
       </div>
+
+      <DetailPanel
+        open={showCreatePanel}
+        title="New enquiry"
+        subtitle="Capture a new lead and create the first step in your pipeline."
+        onClose={handleCreatePanelClose}
+      >
+        <AddEnquiry
+          customers={customers}
+          onSuccess={handleEnquiryCreated}
+          onCancel={handleCreatePanelClose}
+        />
+      </DetailPanel>
     </div>
   )
 }

@@ -58,6 +58,16 @@ export const removeTrackedPaymentWorkflow = async ({ paymentId }) => {
     throw new Error('Payment could not be deleted.')
   }
 
+  if (payment.invoice_id) {
+    const { error: rollupError } = await supabase.rpc('refresh_invoice_payment_rollup', {
+      target_invoice_id: payment.invoice_id,
+    })
+
+    if (rollupError) {
+      console.warn('Invoice payment rollup failed:', rollupError)
+    }
+  }
+
   try {
     const paymentWasPaid = payment.paid === true
 

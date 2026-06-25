@@ -16,7 +16,7 @@ import {
   syncInvoiceAndBookingStatus,
 } from '../utils/statusAutomation'
 import { calculateInvoiceTotals, updateInvoiceDetails } from '../workflows/updateInvoiceWorkflow'
-import { deleteInvoiceWorkflow } from '../workflows/deleteInvoiceWorkflow'
+import { deleteInvoiceWorkflow, getInvoiceDeleteDependencies } from '../workflows/deleteInvoiceWorkflow'
 import { removeTrackedPaymentWorkflow } from '../workflows/removeTrackedPaymentWorkflow'
 import { createPaymentScheduleWorkflow } from '../workflows/createPaymentScheduleWorkflow'
 import { updateTrackedPaymentStatusWorkflow } from '../workflows/updateTrackedPaymentStatusWorkflow'
@@ -81,6 +81,14 @@ const InvoiceDetails = () => {
   const [actionError, setActionError] = useState('')
   const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteDependencies, setDeleteDependencies] = useState({
+    invoiceNumber: '',
+    paymentCount: 0,
+    paymentTotal: 0,
+    itemCount: 0,
+    bookingLinkCount: 0,
+    activityLogCount: 0,
+  })
   const [confirmSendAgain, setConfirmSendAgain] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [confirmRemovePaymentId, setConfirmRemovePaymentId] = useState(null)
@@ -262,6 +270,13 @@ const InvoiceDetails = () => {
       }
     }
 
+    try {
+      const dependencies = await getInvoiceDeleteDependencies({ invoiceId: id })
+      setDeleteDependencies(dependencies)
+    } catch (dependencyError) {
+      console.error(dependencyError)
+    }
+
     setInvoice(syncedInvoice)
   }, [id])
 
@@ -307,9 +322,14 @@ const InvoiceDetails = () => {
   const statusStyles = {
     draft: 'border-slate-200 bg-slate-50 text-slate-700',
     sent: 'border-blue-200 bg-blue-50 text-blue-700',
+    part_paid: 'border-cyan-200 bg-cyan-50 text-cyan-700',
     paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     overdue: 'border-amber-200 bg-amber-50 text-amber-700',
     cancelled: 'border-slate-200 bg-slate-50 text-text-secondary',
+  }
+
+  const statusLabels = {
+    part_paid: 'Part-paid',
   }
 
   const clientEmail = invoice?.clients?.email?.trim()
@@ -336,7 +356,20 @@ const InvoiceDetails = () => {
   const canCreatePaymentLink = Boolean(invoice?.id && invoiceBalanceDue > 0 && invoice.status !== 'cancelled')
   const sentAt = invoice?.last_sent_at || invoice?.invoice_sent_at || null
   const hasSentWarning = Boolean(sentAt) || invoice?.status === 'sent'
-  const showDeleteSection = !isEditing && invoice?.status === 'draft'
+  const showDeleteSection = !isEditing
+  const deleteInvoiceNumber = deleteDependencies.invoiceNumber || invoice?.invoice_number || 'Draft invoice'
+  const deleteWarningItems = [
+    deleteDependencies.paymentCount > 0
+      ? `${deleteDependencies.paymentCount} linked payment${deleteDependencies.paymentCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.itemCount > 0
+      ? `${deleteDependencies.itemCount} invoice item${deleteDependencies.itemCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.bookingLinkCount > 0 ? '1 booking link' : null,
+    deleteDependencies.activityLogCount > 0
+      ? `${deleteDependencies.activityLogCount} activity log${deleteDependencies.activityLogCount === 1 ? '' : 's'}`
+      : null,
+  ].filter(Boolean)
 
   const getScheduledPaymentAmount = (type) => {
     const scheduledPayment = payments.find((payment) => (
@@ -617,7 +650,9 @@ ${messageSignOff}`,
       await deleteInvoiceWorkflow({ invoiceId: invoice.id })
       navigate('/invoices', {
         state: {
-          successMessage: 'Draft invoice deleted successfully.',
+          successMessage: deleteDependencies.paymentCount > 0
+            ? 'Invoice and linked payments deleted successfully.'
+            : 'Invoice deleted successfully.',
         },
       })
     } catch (deleteError) {
@@ -992,7 +1027,7 @@ ${messageSignOff}`,
                   statusStyles[invoice.status] || 'border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >
-                {invoice.status}
+                {statusLabels[invoice.status] || invoice.status}
               </span>
             </div>
 
@@ -1148,7 +1183,7 @@ ${messageSignOff}`,
                   <div className="text-left">
                     <p className="text-sm font-medium text-text-muted">Danger zone</p>
                     <p className="mt-1 text-sm text-text-secondary">
-                      Delete this draft invoice? This action cannot be undone.
+                      Delete this invoice? This action cannot be undone.
                     </p>
                   </div>
 
@@ -1184,13 +1219,46 @@ ${messageSignOff}`,
       <ConfirmDialog
         open={confirmDelete}
         title="Delete invoice"
-        message="Delete this draft invoice? This action cannot be undone."
-        confirmLabel="Delete invoice"
+        message={
+          deleteDependencies.paymentCount > 0
+            ? `This invoice has ${deleteDependencies.paymentCount} linked payment${deleteDependencies.paymentCount === 1 ? '' : 's'} totalling ${formatMessageCurrency(deleteDependencies.paymentTotal, invoice?.currency || appSettings?.currency)}. Deleting this invoice will also remove those payment records. This action cannot be undone.`
+            : 'Delete this invoice? This action cannot be undone.'
+        }
+        confirmLabel={deleteDependencies.paymentCount > 0 ? 'Delete Invoice & Payments' : 'Delete invoice'}
         loadingLabel="Deleting..."
         loading={deleteLoading}
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
-      />
+      >
+        {deleteDependencies.paymentCount > 0 && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            <p className="font-medium">Linked payments will be removed.</p>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <span>Invoice</span>
+                <span className="font-semibold text-rose-900">{deleteInvoiceNumber}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>Payments</span>
+                <span className="font-semibold text-rose-900">{deleteDependencies.paymentCount}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>Payment total</span>
+                <span className="font-semibold text-rose-900">
+                  {formatMessageCurrency(deleteDependencies.paymentTotal, invoice?.currency || appSettings?.currency)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteWarningItems.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p className="font-medium">Linked records:</p>
+            <p className="mt-1">{deleteWarningItems.join(', ')}.</p>
+          </div>
+        )}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={confirmSendAgain}

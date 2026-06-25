@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, X } from 'lucide-react'
+import { PlusCircle, Search, X } from 'lucide-react'
 import { supabase } from '../supabase'
+import DetailPanel from '../components/common/DetailPanel'
 import InvoiceForm from '../components/InvoiceForm'
 import InvoiceList from '../components/InvoiceList'
 import { createInvoiceWorkflow } from '../workflows/createInvoiceWorkflow'
@@ -10,18 +11,19 @@ import { useLocation, useNavigate } from 'react-router-dom'
 const Invoices = () => {
   const location = useLocation()
   const navigate = useNavigate()
+  const bookingContext = location.state?.bookingContext || null
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [invoicesLoading, setInvoicesLoading] = useState(true)
   const [invoices, setInvoices] = useState([])
   const [customers, setCustomers] = useState([])
+  const [showCreatePanel, setShowCreatePanel] = useState(Boolean(bookingContext))
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const searchInputRef = useRef(null)
 
   const debouncedSearchTerm = useDebounce(searchTerm, 250)
-  const bookingContext = location.state?.bookingContext || null
 
   const fetchInvoices = async () => {
     setInvoicesLoading(true)
@@ -92,6 +94,12 @@ const Invoices = () => {
     navigate(location.pathname, { replace: true, state: {} })
   }, [location.pathname, location.state, navigate])
 
+  useEffect(() => {
+    if (bookingContext) {
+      setShowCreatePanel(true)
+    }
+  }, [bookingContext])
+
   const filteredInvoices = useMemo(() => {
     const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
 
@@ -141,6 +149,7 @@ const Invoices = () => {
       setSuccessMessage(
         `Invoice created successfully. Status: ${result.invoice?.status || 'draft'}`
       )
+      setShowCreatePanel(false)
 
       return true
     } catch (workflowError) {
@@ -158,11 +167,27 @@ const Invoices = () => {
   const inputClass =
     'h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition placeholder:text-text-muted focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100'
 
+  const handleCreatePanelClose = () => {
+    if (loading) return
+
+    setShowCreatePanel(false)
+  }
+
   return (
     <>
+      {error && (
+        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className={cardClass}>
+      {successMessage && !error && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+          {successMessage}
+        </div>
+      )}
+
+      <div className={cardClass}>
           <div className="mb-5 flex flex-col gap-4">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -173,6 +198,19 @@ const Invoices = () => {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('')
+                    setSuccessMessage('')
+                    setShowCreatePanel(true)
+                  }}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white shadow-[0_6px_20px_rgba(79,70,229,0.16)] transition hover:bg-indigo-700"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  New invoice
+                </button>
+
                 <div className="rounded-2xl bg-surface-subtle px-4 py-2 text-sm text-text-secondary">
                   {filteredInvoices.length} records
                 </div>
@@ -230,6 +268,7 @@ const Invoices = () => {
                 <option value="all">All statuses</option>
                 <option value="draft">Draft</option>
                 <option value="sent">Sent</option>
+                <option value="part_paid">Part-paid</option>
                 <option value="paid">Paid</option>
                 <option value="overdue">Overdue</option>
                 <option value="cancelled">Cancelled</option>
@@ -244,31 +283,24 @@ const Invoices = () => {
           ) : (
             <InvoiceList invoices={filteredInvoices} />
           )}
-        </div>
-
-        <div className="min-w-0 rounded-2xl border border-border-soft bg-surface p-4 sm:p-6">
-          <h2 className="text-xl font-semibold mb-6">Create invoice</h2>
-          <InvoiceForm
-            key={bookingContext?.bookingId || 'new-invoice'}
-            customers={customers}
-            initialContext={bookingContext}
-            onSubmit={handleCreateInvoice}
-            loading={loading}
-          />
-
-          {error && (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-              {error}
-            </div>
-          )}
-
-          {successMessage && !error && (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-              {successMessage}
-            </div>
-          )}
-        </div>
       </div>
+
+      <DetailPanel
+        open={showCreatePanel}
+        title="Create invoice"
+        subtitle={bookingContext ? 'Create an invoice from the selected booking.' : 'Create an invoice and the linked customer, enquiry, and booking records when needed.'}
+        onClose={handleCreatePanelClose}
+        size="xl"
+      >
+        <InvoiceForm
+          key={bookingContext?.bookingId || (showCreatePanel ? 'new-invoice-open' : 'new-invoice')}
+          customers={customers}
+          initialContext={bookingContext}
+          onSubmit={handleCreateInvoice}
+          onCancel={handleCreatePanelClose}
+          loading={loading}
+        />
+      </DetailPanel>
     </>
   )
 }

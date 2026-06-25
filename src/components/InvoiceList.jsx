@@ -9,7 +9,8 @@ const formatCurrency = (value) =>
 
 const getDisplayStatus = (invoice) => {
   if (invoice.status === 'paid') return 'paid'
-  if (invoice.payment_status === 'partially_paid') return 'partially paid'
+  if (invoice.status === 'part_paid') return 'part_paid'
+  if (invoice.payment_status === 'partially_paid') return 'part_paid'
   return invoice.status
 }
 

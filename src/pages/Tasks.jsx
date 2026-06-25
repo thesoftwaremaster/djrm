@@ -1,12 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ListChecks, RefreshCw, RotateCcw } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ListChecks, PlusCircle, RefreshCw, RotateCcw } from 'lucide-react'
+import DetailPanel from '../components/common/DetailPanel'
 import {
   completeTask,
+  createManualTask,
   fetchTasks,
+  fetchTaskLinkOptions,
   refreshOperationalTasks,
   reopenTask,
 } from '../workflows/tasksWorkflow'
+
+const initialTaskFormValues = {
+  title: '',
+  description: '',
+  priority: 'normal',
+  dueDate: '',
+  linkType: '',
+  linkId: '',
+}
 
 const parseDateOnly = (value) => {
   if (!value) return null
@@ -44,6 +56,7 @@ const getTaskPath = (task) => {
   if (task.invoice_id) return `/invoices/${task.invoice_id}`
   if (task.booking_id) return `/bookings/${task.booking_id}`
   if (task.client_id) return `/customers/${task.client_id}`
+  if (task.entity_type === 'enquiry' && task.entity_id) return `/enquiries/${task.entity_id}`
   if (task.entity_type === 'invoice' && task.entity_id) return `/invoices/${task.entity_id}`
   if (task.entity_type === 'booking' && task.entity_id) return `/bookings/${task.entity_id}`
   if (['client', 'customer'].includes(task.entity_type) && task.entity_id) return `/customers/${task.entity_id}`
@@ -54,6 +67,7 @@ const getTaskPath = (task) => {
 const getTaskType = (task) => {
   if (task.source?.includes('contract')) return 'contract'
   if (task.entity_type === 'payment') return 'payment'
+  if (task.entity_type === 'enquiry') return 'enquiry'
   if (task.invoice_id || task.entity_type === 'invoice') return 'invoice'
   if (task.booking_id || task.entity_type === 'booking') return 'booking'
   if (task.client_id || ['client', 'customer'].includes(task.entity_type)) return 'customer'
@@ -76,9 +90,19 @@ const Tasks = () => {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [showCreatePanel, setShowCreatePanel] = useState(false)
+  const [creatingTask, setCreatingTask] = useState(false)
   const [updatingTaskId, setUpdatingTaskId] = useState('')
   const [error, setError] = useState('')
+  const [createError, setCreateError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [linkOptions, setLinkOptions] = useState({
+    customers: [],
+    enquiries: [],
+    bookings: [],
+    invoices: [],
+  })
+  const [taskFormValues, setTaskFormValues] = useState(initialTaskFormValues)
   const [statusFilter, setStatusFilter] = useState('open')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -98,8 +122,23 @@ const Tasks = () => {
     }
   }
 
+  const loadTaskLinkOptions = async () => {
+    try {
+      const options = await fetchTaskLinkOptions()
+      setLinkOptions(options)
+    } catch (taskLinkError) {
+      console.error(taskLinkError)
+      setLinkOptions({
+        customers: [],
+        enquiries: [],
+        bookings: [],
+        invoices: [],
+      })
+    }
+  }
+
   useEffect(() => {
-    void Promise.resolve().then(() => loadTasks())
+    void Promise.resolve().then(() => Promise.all([loadTasks(), loadTaskLinkOptions()]))
   }, [])
 
   const filteredTasks = useMemo(() => (
@@ -115,6 +154,32 @@ const Tasks = () => {
       return matchesStatus && matchesPriority && matchesType
     })
   ), [priorityFilter, statusFilter, tasks, typeFilter])
+
+  const getCurrentLinkContext = () => {
+    const { linkId, linkType } = taskFormValues
+
+    if (!linkType || !linkId) return null
+
+    if (linkType === 'enquiry') {
+      const enquiry = linkOptions.enquiries.find((item) => item.id === linkId)
+      return { clientId: enquiry?.client_id || null }
+    }
+
+    if (linkType === 'booking') {
+      const booking = linkOptions.bookings.find((item) => item.id === linkId)
+      return { clientId: booking?.enquiries?.client_id || null }
+    }
+
+    if (linkType === 'invoice') {
+      const invoice = linkOptions.invoices.find((item) => item.id === linkId)
+      return {
+        bookingId: invoice?.booking_id || null,
+        clientId: invoice?.client_id || null,
+      }
+    }
+
+    return null
+  }
 
   const groupedTasks = useMemo(() => {
     const todayKey = getDateKey(new Date())
@@ -147,6 +212,74 @@ const Tasks = () => {
       setError('Could not refresh generated tasks.')
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  const resetCreateForm = () => {
+    setTaskFormValues(initialTaskFormValues)
+    setCreateError('')
+  }
+
+  const handleCreatePanelClose = () => {
+    if (creatingTask) return
+
+    setShowCreatePanel(false)
+    resetCreateForm()
+  }
+
+  const updateTaskFormValue = (field, value) => {
+    setTaskFormValues((currentValues) => ({
+      ...currentValues,
+      [field]: value,
+      ...(field === 'linkType' ? { linkId: '' } : {}),
+    }))
+  }
+
+  const handleCreateTask = async (event) => {
+    event.preventDefault()
+
+    if (creatingTask) return
+
+    if (!taskFormValues.title.trim()) {
+      setCreateError('Task title is required.')
+      return
+    }
+
+    if (taskFormValues.dueDate && !isValidDueDate(taskFormValues.dueDate)) {
+      setCreateError('Enter a valid due date.')
+      return
+    }
+
+    if (taskFormValues.linkType && !taskFormValues.linkId) {
+      setCreateError('Choose the record to link this task to.')
+      return
+    }
+
+    setCreatingTask(true)
+    setCreateError('')
+    setError('')
+    setSuccessMessage('')
+
+    try {
+      await createManualTask({
+        title: taskFormValues.title,
+        description: taskFormValues.description,
+        priority: taskFormValues.priority,
+        dueDate: taskFormValues.dueDate,
+        linkType: taskFormValues.linkType,
+        linkId: taskFormValues.linkId,
+        linkContext: getCurrentLinkContext(),
+      })
+
+      setShowCreatePanel(false)
+      resetCreateForm()
+      await loadTasks()
+      setSuccessMessage('Task created.')
+    } catch (taskError) {
+      console.error(taskError)
+      setCreateError(taskError.message || 'Could not create task.')
+    } finally {
+      setCreatingTask(false)
     }
   }
 
@@ -297,16 +430,32 @@ const Tasks = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleRefreshGeneratedTasks}
-          disabled={refreshing}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-accent-primary px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? 'Refreshing...' : 'Refresh generated tasks'}
-        </button>
-      </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => {
+              setError('')
+              setSuccessMessage('')
+              setCreateError('')
+              setShowCreatePanel(true)
+            }}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700"
+          >
+            <PlusCircle className="h-4 w-4" />
+            New task
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRefreshGeneratedTasks}
+            disabled={refreshing}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-border-soft bg-surface px-4 text-sm font-semibold text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh generated tasks'}
+          </button>
+        </div>
+        </div>
 
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -358,6 +507,7 @@ const Tasks = () => {
             >
               <option value="all">All</option>
               <option value="booking">Booking</option>
+              <option value="enquiry">Enquiry</option>
               <option value="invoice">Invoice</option>
               <option value="customer">Customer</option>
               <option value="payment">Payment</option>
@@ -385,6 +535,149 @@ const Tasks = () => {
           <p className="mt-3 text-sm text-text-muted">No tasks found.</p>
         </div>
       )}
+
+      <DetailPanel
+        open={showCreatePanel}
+        title="New task"
+        subtitle="Create a manual task and optionally link it to a CRM record."
+        onClose={handleCreatePanelClose}
+      >
+        <form onSubmit={handleCreateTask} className="space-y-4">
+          <div>
+            <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+              Task title
+            </label>
+            <input
+              value={taskFormValues.title}
+              onChange={(event) => updateTaskFormValue('title', event.target.value)}
+              className="h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition placeholder:text-text-muted focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              placeholder="Task title"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+              Description optional
+            </label>
+            <textarea
+              value={taskFormValues.description}
+              onChange={(event) => updateTaskFormValue('description', event.target.value)}
+              className="min-h-24 w-full rounded-2xl border border-border-soft bg-surface px-4 py-3 text-sm text-text-primary outline-none transition placeholder:text-text-muted focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              placeholder="Task details"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Priority
+              </label>
+              <select
+                value={taskFormValues.priority}
+                onChange={(event) => updateTaskFormValue('priority', event.target.value)}
+                className="h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              >
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Due date optional
+              </label>
+              <input
+                type="date"
+                value={taskFormValues.dueDate}
+                onChange={(event) => updateTaskFormValue('dueDate', event.target.value)}
+                className="h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Link type optional
+              </label>
+              <select
+                value={taskFormValues.linkType}
+                onChange={(event) => updateTaskFormValue('linkType', event.target.value)}
+                className="h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100"
+              >
+                <option value="">No linked record</option>
+                <option value="customer">Customer</option>
+                <option value="enquiry">Enquiry</option>
+                <option value="booking">Booking</option>
+                <option value="invoice">Invoice</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-left text-sm font-medium text-text-primary">
+                Linked record
+              </label>
+              <select
+                value={taskFormValues.linkId}
+                onChange={(event) => updateTaskFormValue('linkId', event.target.value)}
+                disabled={!taskFormValues.linkType}
+                className="h-11 w-full rounded-2xl border border-border-soft bg-surface px-4 text-sm text-text-primary outline-none transition focus:border-accent-primary/45 focus:bg-surface focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">
+                  {taskFormValues.linkType ? 'Choose record' : 'Choose a link type first'}
+                </option>
+                {taskFormValues.linkType === 'customer' && linkOptions.customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name} {customer.email ? `(${customer.email})` : ''}
+                  </option>
+                ))}
+                {taskFormValues.linkType === 'enquiry' && linkOptions.enquiries.map((enquiry) => (
+                  <option key={enquiry.id} value={enquiry.id}>
+                    {enquiry.clients?.name || 'Unknown customer'} - {enquiry.event_type || 'Enquiry'}
+                  </option>
+                ))}
+                {taskFormValues.linkType === 'booking' && linkOptions.bookings.map((booking) => (
+                  <option key={booking.id} value={booking.id}>
+                    {booking.enquiries?.clients?.name || 'Unknown customer'} - {booking.enquiries?.event_type || 'Booking'}
+                  </option>
+                ))}
+                {taskFormValues.linkType === 'invoice' && linkOptions.invoices.map((invoice) => (
+                  <option key={invoice.id} value={invoice.id}>
+                    {invoice.invoice_number || `Invoice ${invoice.id.slice(0, 8)}`} - {invoice.clients?.name || 'Unknown customer'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {createError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {createError}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={handleCreatePanelClose}
+              disabled={creatingTask}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={creatingTask}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {creatingTask ? 'Creating...' : 'Create task'}
+            </button>
+          </div>
+        </form>
+      </DetailPanel>
     </div>
   )
 }

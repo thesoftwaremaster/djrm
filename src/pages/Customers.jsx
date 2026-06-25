@@ -1,8 +1,9 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, X } from 'lucide-react'
+import { PlusCircle, Search, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import CustomerList from '../components/CustomerList'
+import DetailPanel from '../components/common/DetailPanel'
 import TextInput from '../components/ui/TextInput'
 import useDebounce from '../hooks/useDebounce'
 import { isValidEmail } from '../utils/validation'
@@ -15,7 +16,9 @@ const Customers = () => {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState(location.state?.successMessage || '')
   const [customersLoading, setCustomersLoading] = useState(true)
+  const [showCreatePanel, setShowCreatePanel] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
+  const [createError, setCreateError] = useState('')
   const [formValues, setFormValues] = useState({
     name: '',
     email: '',
@@ -88,6 +91,18 @@ const Customers = () => {
 
   const hasActiveFilters = searchTerm.trim() !== ''
 
+  const resetCreateForm = () => {
+    setFormValues({ name: '', email: '', phone: '' })
+    setCreateError('')
+  }
+
+  const handleCreatePanelClose = () => {
+    if (createLoading) return
+
+    setShowCreatePanel(false)
+    resetCreateForm()
+  }
+
   const handleCreateCustomer = async (event) => {
     event.preventDefault()
 
@@ -96,22 +111,22 @@ const Customers = () => {
     const normalizedEmail = formValues.email.trim().toLowerCase()
 
     if (!formValues.name.trim()) {
-      setError('Customer name is required.')
+      setCreateError('Customer name is required.')
       return
     }
 
     if (!normalizedEmail) {
-      setError('Customer email is required.')
+      setCreateError('Customer email is required.')
       return
     }
 
     if (!isValidEmail(normalizedEmail)) {
-      setError('Enter a valid customer email address.')
+      setCreateError('Enter a valid customer email address.')
       return
     }
 
     setCreateLoading(true)
-    setError('')
+    setCreateError('')
     setSuccessMessage('')
 
     try {
@@ -129,7 +144,8 @@ const Customers = () => {
       if (existingCustomers?.[0]) {
         setSuccessMessage('A customer with this email already exists. Showing the existing record.')
         setSearchTerm(existingCustomers[0].email || normalizedEmail)
-        setFormValues({ name: '', email: '', phone: '' })
+        setShowCreatePanel(false)
+        resetCreateForm()
         await fetchCustomers()
         return
       }
@@ -147,12 +163,13 @@ const Customers = () => {
 
       if (createError) throw createError
 
-      setFormValues({ name: '', email: '', phone: '' })
+      setShowCreatePanel(false)
+      resetCreateForm()
       setSuccessMessage('Customer created successfully.')
       await fetchCustomers()
     } catch (createError) {
       console.error(createError)
-      setError(createError.message || 'Could not create customer.')
+      setCreateError(createError.message || 'Could not create customer.')
     } finally {
       setCreateLoading(false)
     }
@@ -172,8 +189,13 @@ const Customers = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className={cardClass}>
+      {successMessage && !error && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+          {successMessage}
+        </div>
+      )}
+
+      <div className={cardClass}>
           <div className="mb-5 flex flex-col gap-4">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -184,6 +206,19 @@ const Customers = () => {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSuccessMessage('')
+                    setCreateError('')
+                    setShowCreatePanel(true)
+                  }}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white shadow-[0_6px_20px_rgba(79,70,229,0.16)] transition hover:bg-indigo-700"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  New customer
+                </button>
+
                 <div className="rounded-2xl bg-surface-subtle px-4 py-2 text-sm text-text-secondary">
                   {filteredCustomers.length} records
                 </div>
@@ -242,16 +277,14 @@ const Customers = () => {
           ) : (
             <CustomerList customers={filteredCustomers} />
           )}
-        </div>
+      </div>
 
-      <div className={`${cardClass} xl:sticky xl:top-28`}>
-        <div className="mb-6">
-          <p className="text-sm font-medium text-text-muted">New customer</p>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight text-text-primary">
-            Create customer
-          </h2>
-        </div>
-
+      <DetailPanel
+        open={showCreatePanel}
+        title="New customer"
+        subtitle="Create a customer record for enquiries, bookings, and invoices."
+        onClose={handleCreatePanelClose}
+      >
         <form onSubmit={handleCreateCustomer} className="space-y-4">
           <TextInput
             label="Customer name"
@@ -293,22 +326,32 @@ const Customers = () => {
             placeholder="Phone number"
           />
 
-          <button
-            type="submit"
-            disabled={createLoading}
-            className="h-12 w-full rounded-2xl bg-accent-primary text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {createLoading ? 'Creating...' : 'Create customer'}
-          </button>
-        </form>
+          {createError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              {createError}
+            </div>
+          )}
 
-        {successMessage && !error && (
-          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-            {successMessage}
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={handleCreatePanelClose}
+              disabled={createLoading}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-border-soft bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={createLoading}
+              className="inline-flex h-11 items-center justify-center rounded-2xl border border-accent-primary bg-accent-primary px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createLoading ? 'Creating...' : 'Create customer'}
+            </button>
           </div>
-        )}
-      </div>
-      </div>
+        </form>
+      </DetailPanel>
     </>
   )
 }

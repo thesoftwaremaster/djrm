@@ -10,6 +10,7 @@ import {
 } from '../utils/appSettings.js'
 import { isValidEmail } from '../utils/validation.js'
 import { getCurrentUserId } from '../utils/tenant.js'
+import { normalizeInvoiceStatus } from '../utils/statusAutomation.js'
 
 const stripEmptyFields = (record) => {
   return Object.fromEntries(
@@ -330,6 +331,7 @@ export const createInvoiceWorkflow = async ({
   )
   const invoiceDueDate = invoice.due_date || getDateAfterDays(settings.default_due_days)
   const invoiceCurrency = invoice.currency || settings.currency
+  const invoiceStatus = normalizeInvoiceStatus(invoice.status)
 
   try {
     if (existingBookingId) {
@@ -348,7 +350,7 @@ export const createInvoiceWorkflow = async ({
         user_id: userId,
         booking_id: existingBooking.id,
         invoice_number: invoiceNumber,
-        status: invoice.status || 'draft',
+        status: invoiceStatus,
         subtotal: invoiceSubtotal,
         tax: invoiceTax,
         total: invoiceTotal,
@@ -475,7 +477,7 @@ export const createInvoiceWorkflow = async ({
       user_id: userId,
       booking_id: savedBooking.id,
       invoice_number: invoiceNumber,
-      status: invoice.status || 'draft',
+      status: invoiceStatus,
       subtotal: invoiceSubtotal,
       tax: invoiceTax,
       total: invoiceTotal,

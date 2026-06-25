@@ -32,6 +32,16 @@ export const updateTrackedPaymentStatusWorkflow = async ({ paymentId, paid }) =>
 
   if (updateError) throw updateError
 
+  if (payment.invoice_id) {
+    const { error: rollupError } = await supabase.rpc('refresh_invoice_payment_rollup', {
+      target_invoice_id: payment.invoice_id,
+    })
+
+    if (rollupError) {
+      console.warn('Invoice payment rollup failed:', rollupError)
+    }
+  }
+
   let invoice = null
 
   if (payment.invoice_id) {

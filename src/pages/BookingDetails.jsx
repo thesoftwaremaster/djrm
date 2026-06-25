@@ -26,6 +26,7 @@ import { fetchBookingConflicts, getConflictLinkText } from '../utils/bookingConf
 import { fetchAppSettings } from '../utils/appSettings'
 import { isValidDateTimeInput } from '../utils/validation'
 import { DEMO_PROTECTED_MESSAGE } from '../utils/demoMode'
+import { getInvoicedTotal } from '../utils/bookingFinancials'
 
 const formatDateTimeLocalValue = (value) => {
   if (!value) return ''
@@ -104,6 +105,7 @@ const BookingDetails = () => {
   const [booking, setBooking] = useState(null)
   const [event, setEvent] = useState(null)
   const [invoices, setInvoices] = useState([])
+  const [payments, setPayments] = useState([])
   const [contract, setContract] = useState(null)
   const [deleteDependencies, setDeleteDependencies] = useState({
     invoiceCount: 0,
@@ -223,7 +225,26 @@ const BookingDetails = () => {
     if (invoiceError) {
       console.error(invoiceError)
     } else {
-      setInvoices(invoiceData || [])
+      const linkedInvoices = invoiceData || []
+      setInvoices(linkedInvoices)
+
+      const invoiceIds = linkedInvoices.map((invoice) => invoice.id)
+
+      if (invoiceIds.length > 0) {
+        const { data: paymentData, error: paymentError } = await supabase
+          .from('payments')
+          .select('id, invoice_id, amount, paid')
+          .in('invoice_id', invoiceIds)
+
+        if (paymentError) {
+          console.error(paymentError)
+          setPayments([])
+        } else {
+          setPayments(paymentData || [])
+        }
+      } else {
+        setPayments([])
+      }
     }
 
     const { data: contractData, error: contractError } = await supabase
@@ -320,6 +341,14 @@ const BookingDetails = () => {
     event?.location || event?.start_time || event?.end_time || event?.notes
   )
   const contractStatus = contract ? 'Signed' : 'Not uploaded'
+  const invoicedTotal = getInvoicedTotal(invoices)
+  const bookingPrice = Number(booking?.total_price || 0)
+  const bookingTotal = bookingPrice > 0 ? bookingPrice : invoicedTotal
+  const paidTotal = payments.reduce((sum, payment) => {
+    if (!payment.paid) return sum
+    return sum + Number(payment.amount || 0)
+  }, 0)
+  const outstandingTotal = Math.max(0, bookingTotal - paidTotal)
   const deleteWarningItems = [
     deleteDependencies.invoiceCount > 0
       ? `${deleteDependencies.invoiceCount} linked invoice${deleteDependencies.invoiceCount === 1 ? '' : 's'}`
@@ -1001,7 +1030,7 @@ ${bookingTemplateData.signOff}`,
               Total
             </p>
             <p className="mt-2 text-2xl font-semibold text-text-primary">
-              {formatCurrency(isEditing ? formValues.totalPrice : booking.total_price)}
+              {formatCurrency(isEditing ? formValues.totalPrice : bookingTotal)}
             </p>
           </div>
         </div>
@@ -1343,6 +1372,28 @@ ${bookingTemplateData.signOff}`,
 
           <div className="rounded-2xl bg-surface-subtle px-4 py-2 text-sm text-text-secondary">
             {invoices.length} invoices
+          </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-text-muted">Booking total</p>
+            <p className="mt-2 text-lg font-semibold text-text-primary">{formatCurrency(bookingTotal)}</p>
+          </div>
+
+          <div className="rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-text-muted">Invoiced</p>
+            <p className="mt-2 text-lg font-semibold text-text-primary">{formatCurrency(invoicedTotal)}</p>
+          </div>
+
+          <div className="rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-text-muted">Paid</p>
+            <p className="mt-2 text-lg font-semibold text-emerald-700">{formatCurrency(paidTotal)}</p>
+          </div>
+
+          <div className="rounded-2xl border border-border-soft bg-surface-subtle px-4 py-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-text-muted">Outstanding</p>
+            <p className="mt-2 text-lg font-semibold text-amber-700">{formatCurrency(outstandingTotal)}</p>
           </div>
         </div>
 

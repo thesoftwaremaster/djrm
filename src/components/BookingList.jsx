@@ -1,6 +1,7 @@
 ﻿import { Link } from 'react-router-dom'
 import { ArrowRight } from 'lucide-react'
 import StatusBadge from './ui/StatusBadge'
+import { getBookingDisplayTotal } from '../utils/bookingFinancials'
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-GB', {
@@ -62,7 +63,7 @@ const BookingList = ({ bookings = [] }) => {
                 Total
               </p>
               <p className="mt-2 break-words text-xl font-semibold text-text-primary">
-                {formatCurrency(booking.total_price)}
+                {formatCurrency(getBookingDisplayTotal(booking))}
               </p>
             </div>
           </div>

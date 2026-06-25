@@ -18,6 +18,7 @@ const InvoiceForm = ({
   customers = [],
   initialContext = null,
   onSubmit,
+  onCancel,
   loading = false,
 }) => {
   const isBookingContext = Boolean(initialContext?.bookingId)
@@ -476,9 +477,22 @@ const InvoiceForm = ({
           </p>
         )}
 
-        <PrimaryButton type="submit" disabled={loading}>
-          {loading ? 'Creating...' : 'Create invoice'}
-        </PrimaryButton>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={loading}
+              className="inline-flex h-12 items-center justify-center rounded-2xl border border-border-soft bg-surface px-5 text-sm font-medium text-text-primary transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          )}
+
+          <PrimaryButton type="submit" disabled={loading} className="sm:w-auto sm:min-w-40">
+            {loading ? 'Creating...' : 'Create invoice'}
+          </PrimaryButton>
+        </div>
       </div>
     </form>
   )

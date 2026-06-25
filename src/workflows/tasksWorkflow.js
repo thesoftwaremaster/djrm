@@ -406,6 +406,155 @@ export const fetchTasks = async () => {
   return data || []
 }
 
+export const fetchTaskLinkOptions = async () => {
+  const userId = await getCurrentUserId()
+
+  const [customersResponse, enquiriesResponse, bookingsResponse, invoicesResponse] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id, name, email, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('enquiries')
+      .select(`
+        id,
+        event_type,
+        event_date,
+        client_id,
+        clients (
+          name
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('bookings')
+      .select(`
+        id,
+        enquiry_id,
+        status,
+        created_at,
+        enquiries (
+          event_type,
+          event_date,
+          client_id,
+          clients (
+            name
+          )
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('invoices')
+      .select(`
+        id,
+        invoice_number,
+        client_id,
+        booking_id,
+        total,
+        created_at,
+        clients (
+          name
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+  ])
+
+  const firstError = [
+    customersResponse,
+    enquiriesResponse,
+    bookingsResponse,
+    invoicesResponse,
+  ].find((response) => response.error)
+
+  if (firstError?.error) throw firstError.error
+
+  return {
+    customers: customersResponse.data || [],
+    enquiries: enquiriesResponse.data || [],
+    bookings: bookingsResponse.data || [],
+    invoices: invoicesResponse.data || [],
+  }
+}
+
+export const createManualTask = async ({
+  title,
+  description = '',
+  priority = 'normal',
+  dueDate = '',
+  linkType = '',
+  linkId = '',
+  linkContext = null,
+}) => {
+  const userId = await getCurrentUserId()
+  const payload = {
+    title: title.trim(),
+    description: description.trim() || null,
+    status: 'open',
+    priority,
+    due_date: dueDate || null,
+    source: 'manual',
+    user_id: userId,
+  }
+
+  if (linkType && linkId) {
+    payload.entity_type = linkType === 'customer' ? 'client' : linkType
+    payload.entity_id = linkId
+  }
+
+  if (linkType === 'customer') {
+    payload.client_id = linkId
+  }
+
+  if (linkType === 'enquiry') {
+    payload.client_id = linkContext?.clientId || null
+  }
+
+  if (linkType === 'booking') {
+    payload.booking_id = linkId
+    payload.client_id = linkContext?.clientId || null
+  }
+
+  if (linkType === 'invoice') {
+    payload.invoice_id = linkId
+    payload.booking_id = linkContext?.bookingId || null
+    payload.client_id = linkContext?.clientId || null
+  }
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert([payload])
+    .select()
+    .single()
+
+  if (error) throw error
+
+  try {
+    await logActivity({
+      entityType: 'task',
+      entityId: data.id,
+      bookingId: data.booking_id,
+      clientId: data.client_id,
+      action: 'task_created',
+      title: 'Task created',
+      description: data.title || 'A manual task was created.',
+      metadata: {
+        task_id: data.id,
+        entity_type: data.entity_type,
+        entity_id: data.entity_id,
+        invoice_id: data.invoice_id,
+      },
+    })
+  } catch (activityLogError) {
+    console.warn('Activity log failed:', activityLogError)
+  }
+
+  return data
+}
+
 export const fetchOpenTasksForRecord = async ({ field, id }) => {
   const userId = await getCurrentUserId()
   if (!field || !id) return []

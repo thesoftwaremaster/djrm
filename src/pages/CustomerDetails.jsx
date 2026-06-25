@@ -17,7 +17,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog'
 import DetailPanel from '../components/common/DetailPanel'
 import CommunicationTemplates from '../components/CommunicationTemplates'
 import RelatedTasks from '../components/RelatedTasks'
-import { deleteCustomerGuarded } from '../workflows/guardedDeleteActions'
+import { deleteCustomerGuarded, getCustomerDeleteDependencies } from '../workflows/guardedDeleteActions'
 import { createEnquiryWithCustomer, convertEnquiryToBooking } from '../workflows/enquiryBookingActions'
 import { createInvoiceWorkflow } from '../workflows/createInvoiceWorkflow'
 import TextInput from '../components/ui/TextInput'
@@ -25,6 +25,7 @@ import { eventTypes } from '../constants'
 import { fetchBookingConflicts, getConflictLinkText } from '../utils/bookingConflicts'
 import { fetchAppSettings } from '../utils/appSettings'
 import { isValidDateInput, isValidEmail } from '../utils/validation'
+import { getBookingDisplayTotal } from '../utils/bookingFinancials'
 
 const defaultContextForm = {
   eventType: '',
@@ -83,6 +84,14 @@ const CustomerDetails = () => {
   const [conflictWarning, setConflictWarning] = useState(null)
   const [successMessage, setSuccessMessage] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteDependencies, setDeleteDependencies] = useState({
+    enquiryCount: 0,
+    bookingCount: 0,
+    invoiceCount: 0,
+    paymentCount: 0,
+    eventCount: 0,
+    contractCount: 0,
+  })
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
@@ -176,6 +185,10 @@ const CustomerDetails = () => {
         status,
         total_price,
         created_at,
+        invoices (
+          id,
+          total
+        ),
         enquiries!inner (
           id,
           client_id,
@@ -192,6 +205,13 @@ const CustomerDetails = () => {
       console.error(bookingError)
     } else {
       setBookings(bookingData || [])
+    }
+
+    try {
+      const dependencies = await getCustomerDeleteDependencies({ customerId: id })
+      setDeleteDependencies(dependencies)
+    } catch (dependencyError) {
+      console.error(dependencyError)
     }
   }, [id])
 
@@ -539,6 +559,26 @@ const CustomerDetails = () => {
   const activeEnquiries = enquiries.filter((enquiry) => enquiry.status !== 'booked')
   const bookedEnquiryCount = enquiries.length - activeEnquiries.length
   const recordCount = activeEnquiries.length + bookings.length + invoices.length
+  const deleteWarningItems = [
+    deleteDependencies.enquiryCount > 0
+      ? `${deleteDependencies.enquiryCount} linked enquir${deleteDependencies.enquiryCount === 1 ? 'y' : 'ies'}`
+      : null,
+    deleteDependencies.bookingCount > 0
+      ? `${deleteDependencies.bookingCount} linked booking${deleteDependencies.bookingCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.invoiceCount > 0
+      ? `${deleteDependencies.invoiceCount} linked invoice${deleteDependencies.invoiceCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.paymentCount > 0
+      ? `${deleteDependencies.paymentCount} linked payment${deleteDependencies.paymentCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.eventCount > 0
+      ? `${deleteDependencies.eventCount} event record${deleteDependencies.eventCount === 1 ? '' : 's'}`
+      : null,
+    deleteDependencies.contractCount > 0
+      ? `${deleteDependencies.contractCount} contract/file record${deleteDependencies.contractCount === 1 ? '' : 's'}`
+      : null,
+  ].filter(Boolean)
   const latestEnquiry = enquiries[0] || null
   const customerTemplateData = {
     clientName: customer?.name || 'there',
@@ -820,17 +860,22 @@ If you have a moment, I would really appreciate any feedback or a short review.`
       <ConfirmDialog
         open={confirmDelete}
         title="Delete customer"
-        message="Delete this customer? This action cannot be undone."
-        confirmLabel="Delete customer"
+        message={
+          deleteWarningItems.length > 0
+            ? 'This customer cannot be deleted because they have linked records. Delete or resolve linked records first.'
+            : 'Delete this customer? This action cannot be undone.'
+        }
+        confirmLabel={deleteWarningItems.length > 0 ? 'Close' : 'Delete customer'}
         loadingLabel="Deleting..."
         loading={deleteLoading}
-        onConfirm={handleDelete}
+        onConfirm={deleteWarningItems.length > 0 ? () => setConfirmDelete(false) : handleDelete}
         onCancel={() => setConfirmDelete(false)}
       >
-        {recordCount > 0 && (
-          <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Financial history is protected and cannot be deleted.
-          </p>
+        {deleteWarningItems.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p className="font-medium">Linked records:</p>
+            <p className="mt-1">{deleteWarningItems.join(', ')}.</p>
+          </div>
         )}
       </ConfirmDialog>
 
@@ -1138,7 +1183,7 @@ If you have a moment, I would really appreciate any feedback or a short review.`
                     </div>
 
                     <p className="text-sm text-text-secondary md:text-right">
-                      {formatCurrency(booking.total_price)}
+                      {formatCurrency(getBookingDisplayTotal(booking))}
                     </p>
 
                     <div className="flex items-center justify-start gap-2 text-sm font-medium text-text-secondary md:justify-end">

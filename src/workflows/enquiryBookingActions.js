@@ -169,6 +169,169 @@ export const createEnquiryWithCustomer = async ({
   return { client, enquiry }
 }
 
+export const createBookingWithCustomer = async ({
+  clientId,
+  name,
+  email,
+  phone,
+  eventType,
+  eventDate = '',
+  venue = '',
+  status = 'pending',
+  totalPrice = 0,
+  startTime = '',
+  endTime = '',
+  notes = '',
+}) => {
+  if (!clientId && !name?.trim()) {
+    throw new Error('Customer name is required.')
+  }
+
+  if (!eventType?.trim()) {
+    throw new Error('Event type is required.')
+  }
+
+  if (eventDate && !isValidDateInput(eventDate)) {
+    throw new Error('Event date must be a valid date.')
+  }
+
+  if (!Number.isFinite(Number(totalPrice)) || Number(totalPrice) < 0) {
+    throw new Error('Total price must be 0 or more.')
+  }
+
+  if (!isValidDateTimeInput(startTime) || !isValidDateTimeInput(endTime)) {
+    throw new Error('Event start and end times must be valid.')
+  }
+
+  if (startTime && endTime && new Date(endTime) < new Date(startTime)) {
+    throw new Error('Event end time cannot be before start time.')
+  }
+
+  const userId = await getCurrentUserId()
+  const client = await findOrCreateClientForEnquiry({ clientId, name, email, phone, userId })
+
+  console.info('[createBookingWithCustomer] current user', {
+    currentUserId: userId,
+    clientId: client.id,
+  })
+
+  const enquiryPayload = {
+    client_id: client.id,
+    user_id: userId,
+    event_type: eventType.trim(),
+    event_date: eventDate || null,
+    venue: normalizeOptionalText(venue),
+    status: 'booked',
+    notes: normalizeOptionalText(notes),
+  }
+
+  console.info('[createBookingWithCustomer] enquiry payload', enquiryPayload)
+
+  const { data: enquiry, error: enquiryError } = await supabase
+    .from('enquiries')
+    .insert([enquiryPayload])
+    .select('id, client_id, event_type, event_date, venue, status, user_id')
+    .single()
+
+  console.info('[createBookingWithCustomer] enquiry insert response', {
+    enquiry,
+    error: enquiryError,
+  })
+
+  if (enquiryError) {
+    console.error('[createBookingWithCustomer] enquiry insert failed', {
+      currentUserId: userId,
+      enquiryPayload,
+      error: enquiryError,
+    })
+    throw enquiryError
+  }
+
+  const bookingPayload = {
+    enquiry_id: enquiry.id,
+    user_id: userId,
+    status,
+    total_price: Number(totalPrice || 0),
+  }
+
+  console.info('[createBookingWithCustomer] booking payload', bookingPayload)
+
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .insert([bookingPayload])
+    .select('id, enquiry_id, status, total_price, user_id, created_at')
+    .single()
+
+  console.info('[createBookingWithCustomer] booking insert response', {
+    booking,
+    error: bookingError,
+  })
+
+  if (bookingError) {
+    console.error('[createBookingWithCustomer] booking insert failed', {
+      currentUserId: userId,
+      bookingPayload,
+      error: bookingError,
+    })
+    throw bookingError
+  }
+
+  const eventPayload = {
+    location: normalizeOptionalText(venue),
+    start_time: normalizeOptionalDateTime(startTime),
+    end_time: normalizeOptionalDateTime(endTime),
+    notes: normalizeOptionalText(notes),
+  }
+  const hasEventValues = Object.values(eventPayload).some((value) => value !== null)
+
+  if (hasEventValues) {
+    const eventInsertPayload = {
+      booking_id: booking.id,
+      user_id: userId,
+      ...eventPayload,
+    }
+
+    console.info('[createBookingWithCustomer] event payload', eventInsertPayload)
+
+    const { data: event, error: eventError } = await supabase
+      .from('events')
+      .insert([eventInsertPayload])
+      .select('id, booking_id, user_id')
+      .single()
+
+    console.info('[createBookingWithCustomer] event insert response', {
+      event,
+      error: eventError,
+    })
+
+    if (eventError) {
+      console.error('[createBookingWithCustomer] event insert failed', {
+        currentUserId: userId,
+        bookingId: booking.id,
+        eventInsertPayload,
+        error: eventError,
+      })
+      throw eventError
+    }
+  }
+
+  await logActivity({
+    entityType: 'booking',
+    entityId: booking.id,
+    bookingId: booking.id,
+    clientId: client.id,
+    action: 'booking_created',
+    title: 'Booking created',
+    description: 'A booking was created from the bookings page.',
+    metadata: {
+      enquiry_id: enquiry.id,
+      source: 'bookings_page',
+    },
+  })
+
+  return { client, enquiry, booking }
+}
+
 export const updateEnquiryDetails = async ({
   enquiryId,
   eventType,
