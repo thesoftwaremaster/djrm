@@ -20,7 +20,11 @@ import CommunicationTemplates from '../components/CommunicationTemplates'
 import RelatedTasks from '../components/RelatedTasks'
 import { useAuth } from '../auth/useAuth'
 import { updateBookingDetails, updateBookingStatus } from '../workflows/enquiryBookingActions'
-import { deleteBookingGuarded, getBookingDeleteDependencies } from '../workflows/guardedDeleteActions'
+import {
+  BOOKING_DELETE_BLOCKED_MESSAGE,
+  deleteBookingGuarded,
+  getBookingDeleteDependencies,
+} from '../workflows/guardedDeleteActions'
 import { logActivity } from '../workflows/activityLogActions'
 import { fetchBookingConflicts, getConflictLinkText } from '../utils/bookingConflicts'
 import { fetchAppSettings } from '../utils/appSettings'
@@ -363,6 +367,7 @@ const BookingDetails = () => {
       ? `${deleteDependencies.contractCount} contract record${deleteDependencies.contractCount === 1 ? '' : 's'}`
       : null,
   ].filter(Boolean)
+  const hasDeleteBlockers = deleteWarningItems.length > 0
 
   const bookingTemplateData = {
     clientName: bookingClient?.name || 'there',
@@ -484,6 +489,35 @@ ${bookingTemplateData.signOff}`,
     }
   }
 
+  const refreshDeleteDependencies = async () => {
+    const dependencies = await getBookingDeleteDependencies({ bookingId: booking.id })
+    setDeleteDependencies(dependencies)
+    return dependencies
+  }
+
+  const hasBlockingDependencies = (dependencies) => (
+    dependencies.invoiceCount > 0 ||
+    dependencies.paymentCount > 0 ||
+    dependencies.eventCount > 0 ||
+    dependencies.contractCount > 0
+  )
+
+  const handleDeletePrompt = async () => {
+    if (!booking) return
+
+    setActionError('')
+    setSuccessMessage('')
+
+    try {
+      await refreshDeleteDependencies()
+    } catch (dependencyError) {
+      console.error(dependencyError)
+      setActionError(dependencyError.message || 'Could not check linked records.')
+    }
+
+    setConfirmDelete(true)
+  }
+
   const handleDelete = async () => {
     if (deleteLoading) return
     if (!booking) return
@@ -493,6 +527,12 @@ ${bookingTemplateData.signOff}`,
     setSuccessMessage('')
 
     try {
+      const dependencies = await refreshDeleteDependencies()
+
+      if (hasBlockingDependencies(dependencies)) {
+        throw new Error(BOOKING_DELETE_BLOCKED_MESSAGE)
+      }
+
       await deleteBookingGuarded({ bookingId: booking.id })
       navigate('/bookings', {
         state: {
@@ -1090,13 +1130,9 @@ ${bookingTemplateData.signOff}`,
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setActionError('')
-                setSuccessMessage('')
-                setConfirmDelete(true)
-              }}
+              <button
+                type="button"
+                onClick={handleDeletePrompt}
               className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-rose-300 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition hover:bg-rose-100 sm:w-auto xl:ml-auto"
             >
               Delete booking
@@ -1138,16 +1174,22 @@ ${bookingTemplateData.signOff}`,
       <ConfirmDialog
         open={confirmDelete}
         title="Delete booking"
-        message="Delete this booking? Events and operational records may be removed, but financial history is protected. This action cannot be undone."
+        message={
+          hasDeleteBlockers
+            ? BOOKING_DELETE_BLOCKED_MESSAGE
+            : 'Delete this booking? This action cannot be undone.'
+        }
         confirmLabel="Delete booking"
+        cancelLabel={hasDeleteBlockers ? 'Close' : 'Cancel'}
         loadingLabel="Deleting..."
         loading={deleteLoading}
+        confirmDisabled={hasDeleteBlockers}
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       >
         {deleteWarningItems.length > 0 && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <p className="font-medium">This will affect:</p>
+            <p className="font-medium">Linked records:</p>
             <p className="mt-1">{deleteWarningItems.join(', ')}.</p>
           </div>
         )}

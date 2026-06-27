@@ -187,18 +187,35 @@ export const incrementSettingsInvoiceNumber = async (settings, usedInvoiceNumber
   if (error) return
 }
 
-export const getPaymentDetailsLines = (settings) => [
-  settings.payment_link_url ? `Payment link: ${settings.payment_link_url}` : '',
-  settings.bank_details,
-  settings.bank_name,
-  settings.bank_account_name,
-  settings.bank_sort_code ? `Sort code: ${settings.bank_sort_code}` : '',
-  settings.bank_account_number ? `Account: ${settings.bank_account_number}` : '',
-  settings.iban ? `IBAN: ${settings.iban}` : '',
-  settings.bic_swift ? `BIC/SWIFT: ${settings.bic_swift}` : '',
-  settings.payment_instructions,
-  settings.payment_reference_instructions,
-].filter(Boolean)
+const normalizePaymentLine = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+export const getPaymentDetailsLines = (settings) => {
+  const seenLines = new Set()
+  const lines = [
+    settings.payment_link_url ? `Payment link: ${settings.payment_link_url}` : '',
+    settings.bank_details,
+    settings.bank_name,
+    settings.bank_account_name,
+    settings.bank_sort_code ? `Sort code: ${settings.bank_sort_code}` : '',
+    settings.bank_account_number ? `Account: ${settings.bank_account_number}` : '',
+    settings.iban ? `IBAN: ${settings.iban}` : '',
+    settings.bic_swift ? `BIC/SWIFT: ${settings.bic_swift}` : '',
+    settings.payment_instructions,
+    settings.payment_reference_instructions,
+  ]
+
+  return lines
+    .flatMap((line) => String(line || '').split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const key = normalizePaymentLine(line)
+      if (seenLines.has(key)) return false
+
+      seenLines.add(key)
+      return true
+    })
+}
 
 export const isMissingInvoiceCurrencyError = (error) => {
   const message = error?.message || ''

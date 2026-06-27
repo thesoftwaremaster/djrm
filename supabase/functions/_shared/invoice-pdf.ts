@@ -72,20 +72,61 @@ const wrapText = (value: string | null | undefined, maxChars: number) => {
   let currentLine = ''
 
   words.forEach((word) => {
-    const candidate = currentLine ? `${currentLine} ${word}` : word
+    const chunks = word.length > maxChars
+      ? word.match(new RegExp(`.{1,${maxChars}}`, 'g')) || [word]
+      : [word]
 
-    if (candidate.length <= maxChars) {
-      currentLine = candidate
-      return
-    }
+    chunks.forEach((chunk) => {
+      const candidate = currentLine ? `${currentLine} ${chunk}` : chunk
 
-    if (currentLine) lines.push(currentLine)
-    currentLine = word
+      if (candidate.length <= maxChars) {
+        currentLine = candidate
+        return
+      }
+
+      if (currentLine) lines.push(currentLine)
+      currentLine = chunk
+    })
   })
 
   if (currentLine) lines.push(currentLine)
 
   return lines.length ? lines : ['-']
+}
+
+const wrapLines = (values: string[], maxChars: number, maxLines: number) => {
+  const wrappedLines = values.flatMap((value) => wrapText(value, maxChars))
+
+  return wrappedLines.slice(0, maxLines)
+}
+
+const normalizeLineForDedupe = (value: string) => {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+const getUniqueLines = (values: string[]) => {
+  const seenLines = new Set<string>()
+  const lines: string[] = []
+
+  values
+    .flatMap((value) => String(value || '').split(/\r?\n/))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      const key = normalizeLineForDedupe(value)
+      if (seenLines.has(key)) return
+
+      seenLines.add(key)
+      lines.push(value)
+    })
+
+  return lines
+}
+
+const shouldLogPaymentDetailsRender = () => {
+  return ['development', 'local', 'true'].includes(
+    String(Deno.env.get('ENVIRONMENT') || Deno.env.get('SUPABASE_ENV') || '').toLowerCase()
+  )
 }
 
 const text = (value: string | number | null | undefined, x: number, y: number, options: {
@@ -380,16 +421,22 @@ const buildPdfContent = ({
 
   y = Math.max(154, totalsTop - 146)
 
-  const paymentLines = [
+  const paymentLines = getUniqueLines([
     paymentLink
       ? 'Pay online via the secure link in the invoice email.'
       : 'Payment link not available yet.',
     ...paymentMethodLines.slice(0, 5),
     `Payment reference: ${invoiceNumber}`,
-  ].filter((paymentLine, index, allLines) => allLines.indexOf(paymentLine) === index)
+  ])
 
-  const paymentCardHeight = 104
   const paymentCardWidth = 260
+  const paymentTextLines = wrapLines(paymentLines, 48, 12)
+  const paymentLineHeight = 13
+  const paymentCardHeight = Math.max(104, 54 + paymentTextLines.length * paymentLineHeight)
+  const minPaymentTop = footerY + 44 + paymentCardHeight - 10
+
+  y = Math.max(y, minPaymentTop)
+
   content += roundedRect({
     x: margin,
     y: y - paymentCardHeight + 10,
@@ -399,13 +446,18 @@ const buildPdfContent = ({
     fill: colors.card,
     stroke: colors.border,
   })
-  content += text('BANK DETAILS / PAYMENT METHODS', margin + 18, y - 10, {
+  content += text('PAYMENT DETAILS', margin + 18, y - 10, {
     size: 8,
     font: 'bold',
     color: colors.brandMuted,
   })
-  paymentLines.slice(0, 6).forEach((paymentLine, index) => {
-    content += text(paymentLine, margin + 18, y - 30 - index * 12, { size: 8.7, color: colors.brandMuted })
+  if (shouldLogPaymentDetailsRender()) {
+    console.log('Rendering payment details')
+  }
+  let paymentLineY = y - 32
+  paymentTextLines.forEach((paymentLine) => {
+    content += text(paymentLine, margin + 18, paymentLineY, { size: 8.7, color: colors.brandMuted })
+    paymentLineY -= paymentLineHeight
   })
 
   const thankYouX = 340

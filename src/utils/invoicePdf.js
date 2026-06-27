@@ -247,6 +247,20 @@ export const downloadInvoicePdf = ({
   doc.setDrawColor(231, 235, 243)
   doc.line(margin, y - 10, rightEdge, y - 10)
 
+  const bankLines = businessDetails.bankLines.length
+    ? businessDetails.bankLines
+    : ['Payment details to be confirmed.']
+  const wrappedBankLines = bankLines
+    .slice(0, 8)
+    .flatMap((line) => doc.splitTextToSize(line, 82))
+    .slice(0, 14)
+  const paymentBlockHeight = 13 + wrappedBankLines.length * 5.5 + 10
+
+  if (y + paymentBlockHeight > pageHeight - margin) {
+    doc.addPage()
+    y = 28
+  }
+
   const footerTop = y
   const footerRightX = 118
   const footerColumnWidth = 72
@@ -259,11 +273,13 @@ export const downloadInvoicePdf = ({
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9.5)
   doc.setTextColor(75, 85, 99)
-  const bankLines = businessDetails.bankLines.length
-    ? businessDetails.bankLines
-    : ['Payment details to be confirmed.']
-  bankLines.slice(0, 8).forEach((line, index) => {
-    doc.text(line, margin, footerTop + 9 + index * 5.5)
+  if (import.meta.env.DEV) {
+    console.log('Rendering payment details')
+  }
+  let bankLineY = footerTop + 9
+  wrappedBankLines.forEach((line) => {
+    doc.text(line, margin, bankLineY)
+    bankLineY += 5.5
   })
 
   doc.setFont('helvetica', 'bold')

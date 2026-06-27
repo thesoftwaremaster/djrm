@@ -6,6 +6,7 @@
   cancelLabel = 'Cancel',
   loadingLabel = 'Working...',
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
   children,
@@ -50,7 +51,7 @@
           <button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className="inline-flex h-11 items-center justify-center rounded-2xl border border-rose-700 bg-rose-700 px-4 text-sm font-medium text-white transition hover:bg-rose-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? loadingLabel : confirmLabel}

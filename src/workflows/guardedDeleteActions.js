@@ -3,6 +3,8 @@ import { assertCurrentUserCanDelete } from '../utils/demoMode'
 import { getCurrentUserId } from '../utils/tenant'
 
 const CONTRACT_BUCKET = 'contracts'
+export const BOOKING_DELETE_BLOCKED_MESSAGE =
+  'This booking cannot be deleted because it has linked records.'
 
 const logBookingDeleteStep = (step, details = {}) => {
   console.info(`[deleteBookingGuarded] ${step}`, details)
@@ -192,19 +194,19 @@ export const deleteEnquiryGuarded = async ({ enquiryId }) => {
 
 export const getBookingDeleteDependencies = async ({ bookingId }) => {
   const [
-    { count: invoiceCount, error: invoiceError },
-    { count: paymentCount, error: paymentError },
+    { data: invoices, error: invoiceError },
+    { data: bookingPayments, error: paymentError },
     { count: eventCount, error: eventError },
     { count: contractCount, error: contractError },
   ] =
     await Promise.all([
       supabase
         .from('invoices')
-        .select('id', { count: 'exact', head: true })
+        .select('id')
         .eq('booking_id', bookingId),
       supabase
         .from('payments')
-        .select('id', { count: 'exact', head: true })
+        .select('id')
         .eq('booking_id', bookingId),
       supabase
         .from('events')
@@ -221,13 +223,36 @@ export const getBookingDeleteDependencies = async ({ bookingId }) => {
   if (eventError) throw eventError
   if (contractError) throw contractError
 
+  const invoiceIds = (invoices || []).map((invoice) => invoice.id)
+  const paymentIds = new Set((bookingPayments || []).map((payment) => payment.id))
+
+  if (invoiceIds.length > 0) {
+    const { data: invoicePayments, error: invoicePaymentError } = await supabase
+      .from('payments')
+      .select('id')
+      .in('invoice_id', invoiceIds)
+
+    if (invoicePaymentError) throw invoicePaymentError
+
+    for (const payment of invoicePayments || []) {
+      paymentIds.add(payment.id)
+    }
+  }
+
   return {
-    invoiceCount: invoiceCount || 0,
-    paymentCount: paymentCount || 0,
+    invoiceCount: invoices?.length || 0,
+    paymentCount: paymentIds.size,
     eventCount: eventCount || 0,
     contractCount: contractCount || 0,
   }
 }
+
+const hasBookingDeleteBlockers = (dependencies) => (
+  dependencies.invoiceCount > 0 ||
+  dependencies.paymentCount > 0 ||
+  dependencies.eventCount > 0 ||
+  dependencies.contractCount > 0
+)
 
 export const deleteBookingGuarded = async ({ bookingId }) => {
   await assertCurrentUserCanDelete()
@@ -295,6 +320,12 @@ export const deleteBookingGuarded = async ({ bookingId }) => {
     throw new Error('Booking has linked records with mismatched ownership.')
   }
 
+  const initialDependencies = await getBookingDeleteDependencies({ bookingId })
+
+  if (hasBookingDeleteBlockers(initialDependencies)) {
+    throw new Error(BOOKING_DELETE_BLOCKED_MESSAGE)
+  }
+
   const { data: invoices, error: invoiceFetchError } = await supabase
     .from('invoices')
     .select('id, status')
@@ -319,9 +350,7 @@ export const deleteBookingGuarded = async ({ bookingId }) => {
   }
 
   const invoiceIds = (invoices || []).map((invoice) => invoice.id)
-  const hasProtectedInvoices = (invoices || []).some(
-    (invoice) => invoice.status !== 'draft'
-  )
+  const hasProtectedInvoices = invoiceIds.length > 0
 
   const { data: contracts, error: contractFetchError } = await supabase
     .from('booking_contracts')
@@ -400,7 +429,7 @@ export const deleteBookingGuarded = async ({ bookingId }) => {
   }
 
   if (hasProtectedInvoices || (bookingPaidPaymentCount || 0) > 0 || invoicePaidPaymentCount > 0) {
-    throw new Error('Financial history is protected and cannot be deleted.')
+    throw new Error(BOOKING_DELETE_BLOCKED_MESSAGE)
   }
 
   const contractFilePaths = (contracts || [])
@@ -514,6 +543,10 @@ export const deleteBookingGuarded = async ({ bookingId }) => {
 
   const dependencies = await getBookingDeleteDependencies({ bookingId })
 
+  if (hasBookingDeleteBlockers(dependencies)) {
+    throw new Error(BOOKING_DELETE_BLOCKED_MESSAGE)
+  }
+
   if (dependencies.eventCount > 0) {
     const { error: eventDeleteError } = await supabase
       .from('events')
@@ -621,6 +654,12 @@ export const deleteBookingGuarded = async ({ bookingId }) => {
         deletedActivityLogCount: deletedActivityLogs?.length || 0,
       })
     }
+  }
+
+  const finalDependencies = await getBookingDeleteDependencies({ bookingId })
+
+  if (hasBookingDeleteBlockers(finalDependencies)) {
+    throw new Error(BOOKING_DELETE_BLOCKED_MESSAGE)
   }
 
   const { data: deletedBooking, error } = await supabase
